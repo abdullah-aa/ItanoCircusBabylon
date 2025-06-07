@@ -205,14 +205,29 @@ const createSpacecraftAndMissiles = (scene: Scene): void => {
 
     // Animation loop for spacecraft and missiles
     scene.onBeforeRenderObservable.add(() => {
-        // Move attackers
-        attackers.forEach(attacker => {
-            // Random movement with some bounds checking
-            attacker.position.addInPlace(new Vector3(
-                (Math.random() - 0.5) * 0.5,
-                (Math.random() - 0.5) * 0.3,
-                (Math.random() - 0.5) * 0.5
-            ));
+        // Initialize time-based movement if not already done
+        if (!scene.metadata) {
+            scene.metadata = {
+                time: 0,
+                attackerPhases: attackers.map(() => Math.random() * Math.PI * 2),
+                defenderPhases: defenders.map(() => Math.random() * Math.PI * 2)
+            };
+        }
+
+        // Update time
+        scene.metadata.time += 0.01;
+        const time = scene.metadata.time;
+
+        // Move attackers in a weaving pattern
+        attackers.forEach((attacker, index) => {
+            const phase = scene.metadata.attackerPhases[index];
+
+            // Sinusoidal movement for weaving effect
+            const xMovement = Math.sin(time * 0.5 + phase);
+            const yMovement = Math.cos(time * 0.3 + phase) * 0.5;
+            const zMovement = Math.sin(time * 0.7 + phase * 2) * 0.7;
+
+            attacker.position.addInPlace(new Vector3(xMovement, yMovement, zMovement));
 
             // Keep within bounds
             if (attacker.position.x < -100) attacker.position.x = -100;
@@ -222,20 +237,22 @@ const createSpacecraftAndMissiles = (scene: Scene): void => {
             if (attacker.position.z < -150) attacker.position.z = -150;
             if (attacker.position.z > 0) attacker.position.z = 0;
 
-            // Random rotation for dynamic feel
-            attacker.rotation.x += (Math.random() - 0.5) * 0.01;
-            attacker.rotation.y += (Math.random() - 0.5) * 0.01;
-            attacker.rotation.z += (Math.random() - 0.5) * 0.01;
+            // Smooth rotation to face movement direction
+            attacker.rotation.x += (Math.sin(time * 0.2 + phase) * 0.01 - attacker.rotation.x) * 0.1;
+            attacker.rotation.y += (Math.cos(time * 0.3 + phase) * 0.01 - attacker.rotation.y) * 0.1;
+            attacker.rotation.z += (Math.sin(time * 0.4 + phase) * 0.01 - attacker.rotation.z) * 0.1;
         });
 
-        // Move defenders
-        defenders.forEach(defender => {
-            // Random movement with some bounds checking
-            defender.position.addInPlace(new Vector3(
-                (Math.random() - 0.5) * 0.3,
-                (Math.random() - 0.5) * 0.2,
-                (Math.random() - 0.5) * 0.3
-            ));
+        // Move defenders in a complementary weaving pattern
+        defenders.forEach((defender, index) => {
+            const phase = scene.metadata.defenderPhases[index];
+
+            // Sinusoidal movement with different frequencies for weaving effect
+            const xMovement = Math.cos(time * 0.6 + phase) * 0.8;
+            const yMovement = Math.sin(time * 0.4 + phase) * 0.4;
+            const zMovement = Math.cos(time * 0.5 + phase * 2) * 0.6;
+
+            defender.position.addInPlace(new Vector3(xMovement, yMovement, zMovement));
 
             // Keep within bounds
             if (defender.position.x < -50) defender.position.x = -50;
@@ -245,10 +262,10 @@ const createSpacecraftAndMissiles = (scene: Scene): void => {
             if (defender.position.z < 30) defender.position.z = 30;
             if (defender.position.z > 150) defender.position.z = 150;
 
-            // Random rotation for dynamic feel
-            defender.rotation.x += (Math.random() - 0.5) * 0.01;
-            defender.rotation.y += (Math.random() - 0.5) * 0.01;
-            defender.rotation.z += (Math.random() - 0.5) * 0.01;
+            // Smooth rotation to face movement direction
+            defender.rotation.x += (Math.cos(time * 0.3 + phase) * 0.01 - defender.rotation.x) * 0.1;
+            defender.rotation.y += (Math.sin(time * 0.2 + phase) * 0.01 - defender.rotation.y) * 0.1;
+            defender.rotation.z += (Math.cos(time * 0.5 + phase) * 0.01 - defender.rotation.z) * 0.1;
         });
 
         // Move missiles along their paths
@@ -263,16 +280,34 @@ const createSpacecraftAndMissiles = (scene: Scene): void => {
                 // Missile reached end of path, reset to start with new path
                 pathData.distance = 0;
 
-                // Choose a new random defender and target
-                const defenderIndex = Math.floor(Math.random() * defenders.length);
-                const defender = defenders[defenderIndex];
-                missile.position = defender.position.clone();
+                // Randomly choose whether an attacker or defender fires the missile
+                let sourcePosition;
+                let targetPosition;
 
-                const targetAttackerIndex = Math.floor(Math.random() * attackers.length);
-                const targetAttacker = attackers[targetAttackerIndex];
+                if (Math.random() < 0.5) {
+                    // Defender fires at an attacker
+                    const defenderIndex = Math.floor(Math.random() * defenders.length);
+                    const defender = defenders[defenderIndex];
+                    sourcePosition = defender.position.clone();
+
+                    const targetAttackerIndex = Math.floor(Math.random() * attackers.length);
+                    const targetAttacker = attackers[targetAttackerIndex];
+                    targetPosition = targetAttacker.position.clone();
+                } else {
+                    // Attacker fires at a defender
+                    const attackerIndex = Math.floor(Math.random() * attackers.length);
+                    const attacker = attackers[attackerIndex];
+                    sourcePosition = attacker.position.clone();
+
+                    const targetDefenderIndex = Math.floor(Math.random() * defenders.length);
+                    const targetDefender = defenders[targetDefenderIndex];
+                    targetPosition = targetDefender.position.clone();
+                }
+
+                missile.position = sourcePosition;
 
                 // Add some randomness to the target position
-                const targetPosition = targetAttacker.position.clone().add(
+                targetPosition.addInPlace(
                     new Vector3(
                         Math.random() * 20 - 10,
                         Math.random() * 20 - 10,
