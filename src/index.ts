@@ -2,39 +2,27 @@ import {
     Engine,
     Scene,
     Vector3,
-    Vector4,
     HemisphericLight,
     MeshBuilder,
     StandardMaterial,
     Color3,
-    FreeCamera,
     Texture,
     ParticleSystem,
     Color4,
     Mesh,
-    Path3D,
     Matrix,
     Quaternion,
     ArcRotateCamera,
     PointLight,
-    SphereParticleEmitter,
-    GPUParticleSystem,
-    TransformNode,
-    Animation,
     Space,
-    Scalar,
-    CubicEase,
-    EasingFunction,
-    BezierCurveEase,
     FollowCamera
 } from '@babylonjs/core';
-import earcut from 'earcut';
 
 // Constants
-const MISSILE_SPEED = 1.2;
+const MISSILE_SPEED = 1.5; // Increased for more effective pursuit
 const ATTACKER_SPEED = 1.5;
-const EVASION_THRESHOLD_MIN = 10;
-const EVASION_THRESHOLD_MAX = 30;
+const EVASION_THRESHOLD_MIN = 5;  // Reduced to allow missiles to get closer
+const EVASION_THRESHOLD_MAX = 15; // Reduced to force more dramatic evasions
 const MISSILE_LIFETIME = 10000; // milliseconds
 const MISSILE_LAUNCH_INTERVAL_MIN = 1000; // milliseconds
 const MISSILE_LAUNCH_INTERVAL_MAX = 3000; // milliseconds
@@ -48,6 +36,7 @@ const STAR_COUNT = 2000;
 // Classes and interfaces
 interface IMissile {
     mesh: Mesh;
+    container: Mesh;
     trail: ParticleSystem;
     target: Vector3;
     speed: number;
@@ -504,28 +493,39 @@ const createMissile = (scene: Scene, startPosition: Vector3, targetPosition: Vec
     // Position the missile
     missileMesh.position = startPosition.clone();
 
-    // Rotate the cylinder to align with the z-axis (cone apex forward)
     // By default, cylinders in Babylon.js are created along the y-axis
+    // We need to create a parent mesh to handle the orientation properly
+    const missileContainer = new Mesh("missileContainer", scene);
+    missileMesh.parent = missileContainer;
+
+    // Rotate the missile mesh 90 degrees around the x-axis to align the cone apex with the z-axis
     missileMesh.rotation.x = Math.PI / 2;
+
+    // Position the container at the start position
+    missileContainer.position = startPosition.clone();
 
     // Look at initial target direction
     const direction = targetPosition.subtract(startPosition);
     if (direction.length() > 0.01) {
+        // Create a rotation quaternion that will orient the container toward the target
         const upVector = Vector3.Up();
         const rotationMatrix = Matrix.LookAtLH(Vector3.Zero(), direction, upVector);
         rotationMatrix.invert();
+
+        // Convert the rotation matrix to a quaternion
         const quaternion = Quaternion.FromRotationMatrix(rotationMatrix);
-        // Clear the rotation before applying quaternion to avoid conflicts
-        missileMesh.rotation.x = 0;
-        missileMesh.rotationQuaternion = quaternion;
+
+        // Apply the quaternion rotation to the container
+        missileContainer.rotationQuaternion = quaternion;
     }
 
     // Create enhanced smoke trail for the missile
     const missileTrail = new ParticleSystem("missileTrail", 500, scene);
     missileTrail.particleTexture = new Texture("https://raw.githubusercontent.com/BabylonJS/Babylon.js/master/assets/textures/flare.png", scene);
     missileTrail.emitter = missileMesh;
-    missileTrail.minEmitBox = new Vector3(0, 0, -MISSILE_SIZE * 1.6); // Emit from inner nozzle
-    missileTrail.maxEmitBox = new Vector3(0, 0, -MISSILE_SIZE * 1.6);
+    // Adjust emit box to account for the rotated missile mesh
+    missileTrail.minEmitBox = new Vector3(0, -MISSILE_SIZE * 1.6, 0); // Emit from inner nozzle
+    missileTrail.maxEmitBox = new Vector3(0, -MISSILE_SIZE * 1.6, 0);
 
     // Two-stage color for more realistic rocket exhaust
     missileTrail.color1 = new Color4(1, 0.7, 0.1, 0.8); // Bright yellow-orange core
@@ -568,8 +568,9 @@ const createMissile = (scene: Scene, startPosition: Vector3, targetPosition: Vec
     const engineCore = new ParticleSystem("engineCore", 100, scene);
     engineCore.particleTexture = new Texture("https://raw.githubusercontent.com/BabylonJS/Babylon.js/master/assets/textures/flare.png", scene);
     engineCore.emitter = missileMesh;
-    engineCore.minEmitBox = new Vector3(0, 0, -MISSILE_SIZE * 1.6);
-    engineCore.maxEmitBox = new Vector3(0, 0, -MISSILE_SIZE * 1.6);
+    // Adjust emit box to account for the rotated missile mesh
+    engineCore.minEmitBox = new Vector3(0, -MISSILE_SIZE * 1.6, 0);
+    engineCore.maxEmitBox = new Vector3(0, -MISSILE_SIZE * 1.6, 0);
 
     // Bright white-yellow core
     engineCore.color1 = new Color4(1, 1, 0.7, 1);
@@ -616,42 +617,15 @@ const createMissile = (scene: Scene, startPosition: Vector3, targetPosition: Vec
 
     missileTrail.start();
 
-    // Decide if this missile will use bezier path
-    const useBezier = Math.random() > 0.5;
+    // All missiles use bezier paths for more interesting movement
+    const useBezier = true;
 
-    // If using bezier, calculate control points
-    let bezierPoints: Vector3[] | undefined;
-    if (useBezier) {
-        const startToTarget = targetPosition.subtract(startPosition);
-        const distance = startToTarget.length();
-        const direction = startToTarget.normalize();
-
-        // Calculate a midpoint along the direct path
-        const midPoint = startPosition.add(direction.scale(distance * 0.5));
-
-        // Create more controlled bezier points for smoother, more realistic missile paths
-        // Use perpendicular vectors to create a curved path
-        const perpendicular = new Vector3(
-            direction.y, 
-            -direction.x, 
-            direction.z
-        ).normalize();
-
-        // Create a smooth arc by using controlled offsets
-        const curveOffset = distance * 0.2; // 20% of distance for curve height
-
-        bezierPoints = [
-            startPosition.clone(),
-            // First control point - slightly ahead of start and a bit to the side
-            startPosition.add(direction.scale(distance * 0.25)).add(perpendicular.scale(curveOffset * 0.5)),
-            // Second control point - past midpoint and to the same side
-            midPoint.add(direction.scale(distance * 0.25)).add(perpendicular.scale(curveOffset)),
-            targetPosition.clone()
-        ];
-    }
+    // Create bezier path from start to target position
+    const bezierPoints = createBezierPath(startPosition, targetPosition);
 
     return {
         mesh: missileMesh,
+        container: missileContainer,
         trail: missileTrail,
         target: targetPosition.clone(),
         speed: MISSILE_SPEED * getRandomFloat(0.8, 1.2), // Slight speed variation
@@ -983,6 +957,7 @@ const updateMissiles = (missiles: IMissile[], attacker: IAttacker, currentTime: 
         if (currentTime > missile.lifetime) {
             missile.trail.dispose();
             missile.mesh.dispose();
+            missile.container.dispose();
             missiles.splice(i, 1);
             continue;
         }
@@ -990,17 +965,73 @@ const updateMissiles = (missiles: IMissile[], attacker: IAttacker, currentTime: 
         // Update target to current attacker position
         missile.target = attacker.mesh.position.clone();
 
-        // Move missile based on path type
-        if (missile.useBezier && missile.bezierPoints) {
-            // Bezier curve path
+        // All missiles use bezier paths
+        if (missile.bezierPoints) {
+            // Initialize bezier time if needed
             if (missile.bezierTime === undefined) {
                 missile.bezierTime = 0;
             }
 
-            missile.bezierTime += missile.speed * 0.01;
+            // Calculate distance to attacker for dynamic adjustments
+            const distanceToAttacker = Vector3.Distance(missile.container.position, attacker.mesh.position);
 
-            if (missile.bezierTime > 1) {
-                missile.bezierTime = 1;
+            // Adjust missile speed based on distance to attacker
+            let currentSpeed = missile.speed;
+
+            // Boost speed when getting close to attacker for more aggressive pursuit
+            if (distanceToAttacker < 30) {
+                // Significant speed boost when very close
+                currentSpeed = missile.speed * 1.5;
+            } else if (distanceToAttacker < 60) {
+                // Moderate speed boost when approaching
+                currentSpeed = missile.speed * 1.2;
+            }
+
+            // Advance along the bezier curve with adjusted speed
+            missile.bezierTime += currentSpeed * 0.01;
+
+            // Dramatically increase adjustment chance as missile gets closer to attacker
+            // This creates more erratic and aggressive course corrections when close
+            let adjustmentChance;
+
+            if (distanceToAttacker < 20) {
+                // Very close - high chance of dramatic course correction
+                adjustmentChance = 0.2;
+            } else if (distanceToAttacker < 50) {
+                // Moderately close - increased chance of course correction
+                adjustmentChance = 0.1;
+            } else {
+                // Far away - normal adjustment based on bezier time
+                adjustmentChance = Math.min(0.01, missile.bezierTime * 0.02);
+            }
+
+            if (Math.random() < adjustmentChance || missile.bezierTime >= 1) {
+                // Generate a new bezier path from current position to target
+                // Use more aggressive path generation for close missiles
+                if (distanceToAttacker < 30) {
+                    // Create a more direct and aggressive path when close
+                    const toTarget = missile.target.subtract(missile.container.position);
+                    const direction = toTarget.normalize();
+
+                    // More direct approach with sharper turns
+                    missile.bezierPoints = [
+                        missile.container.position.clone(),
+                        // First control point - closer to direct line
+                        missile.container.position.add(direction.scale(distanceToAttacker * 0.3)),
+                        // Second control point - very close to target
+                        missile.target.subtract(direction.scale(distanceToAttacker * 0.1)),
+                        missile.target.clone()
+                    ];
+                } else {
+                    // Normal bezier path for farther missiles
+                    missile.bezierPoints = createBezierPath(
+                        missile.container.position.clone(),
+                        missile.target.clone()
+                    );
+                }
+
+                // Reset bezier time for the new path
+                missile.bezierTime = 0;
             }
 
             // Calculate position on bezier curve
@@ -1013,7 +1044,7 @@ const updateMissiles = (missiles: IMissile[], attacker: IAttacker, currentTime: 
             );
 
             // Calculate direction for rotation
-            const direction = newPosition.subtract(missile.mesh.position);
+            const direction = newPosition.subtract(missile.container.position);
             if (direction.length() > 0.01) {
                 direction.normalize();
 
@@ -1022,39 +1053,19 @@ const updateMissiles = (missiles: IMissile[], attacker: IAttacker, currentTime: 
                 const rotationMatrix = Matrix.LookAtLH(Vector3.Zero(), direction, upVector);
                 rotationMatrix.invert();
                 const quaternion = Quaternion.FromRotationMatrix(rotationMatrix);
-                missile.mesh.rotationQuaternion = quaternion;
+                missile.container.rotationQuaternion = quaternion;
             }
 
-            missile.mesh.position.copyFrom(newPosition);
-
-            // If we've reached the end of the bezier curve, switch to direct pursuit
-            if (missile.bezierTime >= 1) {
-                missile.useBezier = false;
-            }
-        } else {
-            // Direct pursuit path
-            const direction = missile.target.subtract(missile.mesh.position);
-            if (direction.length() > 0.01) {
-                direction.normalize();
-
-                // Update position
-                missile.mesh.position.addInPlace(direction.scale(missile.speed));
-
-                // Update rotation to face movement direction
-                const upVector = Vector3.Up();
-                const rotationMatrix = Matrix.LookAtLH(Vector3.Zero(), direction, upVector);
-                rotationMatrix.invert();
-                const quaternion = Quaternion.FromRotationMatrix(rotationMatrix);
-                missile.mesh.rotationQuaternion = quaternion;
-            }
+            // Update missile container position
+            missile.container.position.copyFrom(newPosition);
         }
 
         // Check if missile has hit the attacker
-        if (Vector3.Distance(missile.mesh.position, attacker.mesh.position) < ATTACKER_SIZE / 2) {
+        if (Vector3.Distance(missile.container.position, attacker.mesh.position) < ATTACKER_SIZE / 2) {
             // Create explosion effect
-            const explosion = new ParticleSystem("explosion", 500, missile.mesh.getScene());
-            explosion.particleTexture = new Texture("https://raw.githubusercontent.com/BabylonJS/Babylon.js/master/assets/textures/flare.png", missile.mesh.getScene());
-            explosion.emitter = missile.mesh.position;
+            const explosion = new ParticleSystem("explosion", 500, missile.container.getScene());
+            explosion.particleTexture = new Texture("https://raw.githubusercontent.com/BabylonJS/Babylon.js/master/assets/textures/flare.png", missile.container.getScene());
+            explosion.emitter = missile.container.position;
 
             explosion.color1 = new Color4(1, 0.5, 0, 1);
             explosion.color2 = new Color4(1, 0.2, 0, 1);
@@ -1083,9 +1094,61 @@ const updateMissiles = (missiles: IMissile[], attacker: IAttacker, currentTime: 
             // Remove the missile
             missile.trail.dispose();
             missile.mesh.dispose();
+            missile.container.dispose();
             missiles.splice(i, 1);
         }
     }
+};
+
+// Create a bezier path from start to target position
+const createBezierPath = (startPos: Vector3, targetPos: Vector3): Vector3[] => {
+    const toTarget = targetPos.subtract(startPos);
+    const distance = toTarget.length();
+    const direction = toTarget.normalize();
+
+    // Calculate a midpoint along the direct path with some randomness
+    const midPointOffset = getRandomFloat(0.4, 0.6); // Randomize midpoint position
+    const midPoint = startPos.add(direction.scale(distance * midPointOffset));
+
+    // Create a perpendicular vector for the curve
+    // Randomly choose between different perpendicular vectors for more diversity
+    let perpendicular;
+    const randomChoice = Math.random();
+
+    if (randomChoice < 0.33) {
+        // Option 1: Standard perpendicular in XY plane
+        perpendicular = new Vector3(direction.y, -direction.x, direction.z);
+    } else if (randomChoice < 0.66) {
+        // Option 2: Perpendicular in XZ plane
+        perpendicular = new Vector3(direction.z, direction.y, -direction.x);
+    } else {
+        // Option 3: Perpendicular in YZ plane
+        perpendicular = new Vector3(direction.x, direction.z, -direction.y);
+    }
+
+    // Normalize and add some random variation to the perpendicular vector
+    perpendicular.normalize();
+
+    // Add a small random component to make paths even more diverse
+    perpendicular.x += getRandomFloat(-0.2, 0.2);
+    perpendicular.y += getRandomFloat(-0.2, 0.2);
+    perpendicular.z += getRandomFloat(-0.2, 0.2);
+    perpendicular.normalize();
+
+    // Randomize the curve offset for more varied paths - much wider range
+    const curveOffset = distance * getRandomFloat(0.2, 0.5);
+
+    // Create bezier points with more variation
+    return [
+        startPos.clone(),
+        // First control point - with randomized distance and offset
+        startPos.add(direction.scale(distance * getRandomFloat(0.2, 0.4)))
+               .add(perpendicular.scale(curveOffset * getRandomFloat(0.3, 0.7))),
+        // Second control point - with randomized distance and offset
+        midPoint.add(direction.scale(distance * getRandomFloat(0.1, 0.3)))
+               .add(perpendicular.scale(curveOffset * getRandomFloat(0.7, 1.0))),
+        targetPos.clone()
+    ];
 };
 
 // Calculate point on a cubic bezier curve
