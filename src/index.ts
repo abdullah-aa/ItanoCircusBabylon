@@ -21,8 +21,8 @@ import {
 // Constants
 const MISSILE_SPEED = 1.5; // Increased for more effective pursuit
 const ATTACKER_SPEED = 1.5;
-const EVASION_THRESHOLD_MIN = 5;  // Reduced to allow missiles to get closer
-const EVASION_THRESHOLD_MAX = 15; // Reduced to force more dramatic evasions
+const EVASION_THRESHOLD_MIN = 3;  // Further reduced to allow some missiles to get close enough to explode
+const EVASION_THRESHOLD_MAX = 15; // Kept the same for dramatic evasions
 const MISSILE_LIFETIME = 10000; // milliseconds
 const MISSILE_LAUNCH_INTERVAL_MIN = 1000; // milliseconds
 const MISSILE_LAUNCH_INTERVAL_MAX = 3000; // milliseconds
@@ -91,8 +91,8 @@ const createScene = (canvas: HTMLCanvasElement): Scene => {
     const attackerCamera = new FollowCamera("attackerCamera", new Vector3(0, 0, -50), scene);
     attackerCamera.minZ = 0.1;
     attackerCamera.maxZ = 2000;
-    attackerCamera.radius = 30; // Distance from the target
-    attackerCamera.heightOffset = 10; // Height above the target
+    attackerCamera.radius = 50; // Increased distance from the target for better visibility of chasing missiles
+    attackerCamera.heightOffset = 15; // Increased height above the target for better view
     attackerCamera.rotationOffset = 0; // View head-on (was 180 for view from behind)
     attackerCamera.cameraAcceleration = 0.05; // Smoothing
     attackerCamera.maxCameraSpeed = 10; // Speed limit
@@ -454,7 +454,10 @@ const createAttacker = (scene: Scene): IAttacker => {
         transitionDuration: 2000, // 2 seconds to transition between targets
         speed: ATTACKER_SPEED,
         currentSpeed: ATTACKER_SPEED * 0.5, // Start at half speed and accelerate
-        evasionThreshold: getRandomFloat(EVASION_THRESHOLD_MIN, EVASION_THRESHOLD_MAX),
+        // 30% chance of a low threshold to allow missiles to get closer from the start
+        evasionThreshold: Math.random() < 0.3 
+            ? getRandomFloat(EVASION_THRESHOLD_MIN, EVASION_THRESHOLD_MIN + 2)
+            : getRandomFloat(EVASION_THRESHOLD_MIN + 3, EVASION_THRESHOLD_MAX),
         lastShotTime: 0,
         lastEvasionTime: 0,
         isEvading: false
@@ -712,8 +715,13 @@ const updateAttacker = (
         attacker.transitionDuration = 2000; // 2 seconds for smoother evasion
         targetUpdated = true;
 
-        // Reset evasion threshold for next time - slightly more consistent
-        attacker.evasionThreshold = getRandomFloat(EVASION_THRESHOLD_MIN + 5, EVASION_THRESHOLD_MAX - 5);
+        // Reset evasion threshold for next time - allow for occasional close approaches
+        // 30% chance of a low threshold to allow missiles to get closer
+        if (Math.random() < 0.3) {
+            attacker.evasionThreshold = getRandomFloat(EVASION_THRESHOLD_MIN, EVASION_THRESHOLD_MIN + 2);
+        } else {
+            attacker.evasionThreshold = getRandomFloat(EVASION_THRESHOLD_MIN + 3, EVASION_THRESHOLD_MAX - 3);
+        }
     } 
     // Continuously update target to ensure constant movement around the space station
     // Check if we're close to the target or if we've been moving toward the same target for too long
