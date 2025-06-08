@@ -25,8 +25,10 @@ import {
     Scalar,
     CubicEase,
     EasingFunction,
-    BezierCurveEase
+    BezierCurveEase,
+    FollowCamera
 } from '@babylonjs/core';
+import earcut from 'earcut';
 
 // Constants
 const MISSILE_SPEED = 1.2;
@@ -66,6 +68,8 @@ interface IAttacker {
     currentSpeed: number;    // For acceleration/deceleration
     evasionThreshold: number;
     lastShotTime: number;
+    lastEvasionTime: number; // When the last evasion maneuver was performed
+    isEvading: boolean;      // Whether the attacker is currently evading
 }
 
 // Main function to create the scene
@@ -75,25 +79,45 @@ const createScene = (canvas: HTMLCanvasElement): Scene => {
     const scene = new Scene(engine);
     scene.clearColor = new Color4(0, 0, 0, 1); // Black background for space
 
-    // Create free camera for mouse and keyboard controls
-    const camera = new FreeCamera("camera", new Vector3(0, 0, -100), scene);
-    camera.attachControl(canvas, true);
-    camera.minZ = 0.1;
-    camera.maxZ = 2000;
+    // Camera modes
+    const CAMERA_MODE = {
+        STATION: 0,
+        ATTACKER: 1,
+        NEUTRAL: 2
+    };
+    let currentCameraMode = CAMERA_MODE.STATION;
 
-    // Set camera speed
-    camera.speed = 2.0;
-    camera.angularSensibility = 500; // Lower value = higher sensitivity
+    // We don't need the free camera anymore as we're using the neutral camera for the free view
 
-    // Enable WASD controls
-    camera.keysUp.push(87);    // W
-    camera.keysDown.push(83);  // S
-    camera.keysLeft.push(65);  // A
-    camera.keysRight.push(68); // D
+    // Create arc rotate camera for space station view
+    const stationCamera = new ArcRotateCamera("stationCamera", Math.PI / 2, Math.PI / 2, 100, Vector3.Zero(), scene);
+    stationCamera.setTarget(Vector3.Zero());
+    stationCamera.attachControl(canvas, true);
+    stationCamera.minZ = 0.1;
+    stationCamera.maxZ = 2000;
+    stationCamera.lowerRadiusLimit = 50;
+    stationCamera.upperRadiusLimit = 300;
 
-    // Add keys for up/down movement
-    camera.keysUpward.push(69);   // E
-    camera.keysDownward.push(81); // Q
+    // Create follow camera for attacker
+    const attackerCamera = new FollowCamera("attackerCamera", new Vector3(0, 0, -50), scene);
+    attackerCamera.minZ = 0.1;
+    attackerCamera.maxZ = 2000;
+    attackerCamera.radius = 30; // Distance from the target
+    attackerCamera.heightOffset = 10; // Height above the target
+    attackerCamera.rotationOffset = 0; // View head-on (was 180 for view from behind)
+    attackerCamera.cameraAcceleration = 0.05; // Smoothing
+    attackerCamera.maxCameraSpeed = 10; // Speed limit
+
+    // Create neutral camera for overview of the scene
+    const neutralCamera = new ArcRotateCamera("neutralCamera", Math.PI / 4, Math.PI / 3, 300, Vector3.Zero(), scene);
+    neutralCamera.minZ = 0.1;
+    neutralCamera.maxZ = 2000;
+    neutralCamera.lowerRadiusLimit = 150;
+    neutralCamera.upperRadiusLimit = 500;
+    neutralCamera.setTarget(Vector3.Zero());
+
+    // Set active camera
+    scene.activeCamera = stationCamera;
 
     // Create lights
     const hemisphericLight = new HemisphericLight("hemisphericLight", new Vector3(0, 1, 0), scene);
@@ -113,11 +137,61 @@ const createScene = (canvas: HTMLCanvasElement): Scene => {
     // Create attacker
     const attacker = createAttacker(scene);
 
+    // Set camera targets
+    stationCamera.setTarget(battlestation.position);
+    attackerCamera.lockedTarget = attacker.mesh;
+
+    // Add keyboard event listener for camera switching
+    const switchCamera = () => {
+        // Cycle through camera modes
+        currentCameraMode = (currentCameraMode + 1) % 3;
+
+        // Detach controls from all cameras
+        if (scene.activeCamera) {
+            scene.activeCamera.detachControl(canvas);
+        }
+
+        // Set the active camera based on the current mode
+        switch (currentCameraMode) {
+            case CAMERA_MODE.STATION:
+                // Update station camera position to look at the battlestation
+                stationCamera.setTarget(battlestation.position);
+                scene.activeCamera = stationCamera;
+                stationCamera.attachControl(canvas, true);
+                console.log("Camera Mode: Space Station View");
+                break;
+            case CAMERA_MODE.ATTACKER:
+                // Ensure the follow camera is tracking the attacker
+                attackerCamera.lockedTarget = attacker.mesh;
+                scene.activeCamera = attackerCamera;
+                console.log("Camera Mode: Attacker Front View");
+                break;
+            case CAMERA_MODE.NEUTRAL:
+                // Set the neutral camera to view the scene
+                neutralCamera.setTarget(Vector3.Zero());
+                scene.activeCamera = neutralCamera;
+                neutralCamera.attachControl(canvas, true);
+                console.log("Camera Mode: Neutral Scene View");
+                break;
+        }
+    };
+
+    // Add keyboard event listener for spacebar
+    window.addEventListener("keydown", (event) => {
+        if (event.keyCode === 32) { // Spacebar
+            switchCamera();
+        }
+    });
+
     // Array to store active missiles
     const missiles: IMissile[] = [];
 
     // Game loop
     let lastMissileLaunchTime = 0;
+    let barrageInProgress = false;
+    // Initialize nextBarrageTime to current time + a small delay to allow the scene to fully load
+    let nextBarrageTime = Date.now() + 2000; // 2 second initial delay
+
     scene.onBeforeRenderObservable.add(() => {
         const currentTime = Date.now();
 
@@ -127,10 +201,29 @@ const createScene = (canvas: HTMLCanvasElement): Scene => {
         // Update missiles
         updateMissiles(missiles, attacker, currentTime);
 
-        // Launch new missiles at random intervals
-        if (currentTime - lastMissileLaunchTime > getRandomInt(MISSILE_LAUNCH_INTERVAL_MIN, MISSILE_LAUNCH_INTERVAL_MAX)) {
-            launchMissileBarrage(scene, battlestation, attacker, missiles);
-            lastMissileLaunchTime = currentTime;
+        // Update camera targets if needed
+        if (currentCameraMode === CAMERA_MODE.STATION) {
+            stationCamera.setTarget(battlestation.position);
+        } else if (currentCameraMode === CAMERA_MODE.NEUTRAL) {
+            // Keep the neutral camera focused on the center of the scene
+            neutralCamera.setTarget(Vector3.Zero());
+        } else if (currentCameraMode === CAMERA_MODE.ATTACKER) {
+            // Ensure the attacker camera is tracking the attacker
+            attackerCamera.lockedTarget = attacker.mesh;
+        }
+        // The attackerCamera automatically follows its lockedTarget
+
+        // Check if we should launch a new barrage
+        if (currentTime > nextBarrageTime) {
+            // Only launch if no missiles are currently active (previous barrage is gone)
+            if (missiles.length === 0) {
+                launchMissileBarrage(scene, battlestation, attacker, missiles);
+                lastMissileLaunchTime = currentTime;
+                barrageInProgress = true;
+
+                // Set the next barrage time with a random interval
+                nextBarrageTime = currentTime + getRandomInt(MISSILE_LAUNCH_INTERVAL_MIN, MISSILE_LAUNCH_INTERVAL_MAX);
+            }
         }
 
         // Update space station rotation
@@ -373,7 +466,9 @@ const createAttacker = (scene: Scene): IAttacker => {
         speed: ATTACKER_SPEED,
         currentSpeed: ATTACKER_SPEED * 0.5, // Start at half speed and accelerate
         evasionThreshold: getRandomFloat(EVASION_THRESHOLD_MIN, EVASION_THRESHOLD_MAX),
-        lastShotTime: 0
+        lastShotTime: 0,
+        lastEvasionTime: 0,
+        isEvading: false
     };
 };
 
@@ -392,90 +487,26 @@ const launchMissileBarrage = (scene: Scene, battlestation: Mesh, attacker: IAtta
 
 // Create a single missile
 const createMissile = (scene: Scene, startPosition: Vector3, targetPosition: Vector3): IMissile => {
-    // Create main missile body
-    const missileMesh = MeshBuilder.CreateCylinder("missile", { 
-        height: MISSILE_SIZE * 3, 
-        diameter: MISSILE_SIZE / 2 
+    // Create a simple cone for the missile
+    const missileMesh = MeshBuilder.CreateCylinder("missile", {
+        height: MISSILE_SIZE * 3,
+        diameterTop: 0,
+        diameterBottom: MISSILE_SIZE,
+        tessellation: 24 // Higher tessellation for smoother cone
     }, scene);
 
     const missileMaterial = new StandardMaterial("missileMaterial", scene);
-    missileMaterial.diffuseColor = new Color3(0.7, 0.7, 0.7);
-    missileMaterial.emissiveColor = new Color3(0.2, 0.2, 0.2);
+    missileMaterial.diffuseColor = new Color3(0.8, 0.8, 0.8);
+    missileMaterial.specularColor = new Color3(0.3, 0.3, 0.3);
+    missileMaterial.emissiveColor = new Color3(0.1, 0.1, 0.1);
     missileMesh.material = missileMaterial;
 
-    // Create nose cone
-    const noseCone = MeshBuilder.CreateCylinder("noseCone", {
-        height: MISSILE_SIZE,
-        diameterTop: 0,
-        diameterBottom: MISSILE_SIZE / 2
-    }, scene);
-    noseCone.parent = missileMesh;
-    noseCone.position.z = MISSILE_SIZE * 2;
-    // Rotate to align with missile body
-    noseCone.rotation.x = Math.PI / 2;
-
-    // Create fins (4 fins arranged in X pattern)
-    const finMaterial = new StandardMaterial("finMaterial", scene);
-    finMaterial.diffuseColor = new Color3(0.5, 0.5, 0.5);
-
-    for (let i = 0; i < 4; i++) {
-        const fin = MeshBuilder.CreateBox("fin" + i, {
-            width: MISSILE_SIZE / 10,
-            height: MISSILE_SIZE,
-            depth: MISSILE_SIZE
-        }, scene);
-        fin.parent = missileMesh;
-        fin.position.z = -MISSILE_SIZE * 1.2;
-        // Position fins outward from center
-        const angle = Math.PI / 4 + (i * Math.PI / 2);
-        fin.position.x = Math.cos(angle) * (MISSILE_SIZE / 4);
-        fin.position.y = Math.sin(angle) * (MISSILE_SIZE / 4);
-        fin.rotation.z = angle; // Rotate each fin 45 degrees + 90 degrees per fin
-        // Align with missile body
-        fin.rotation.x = Math.PI / 2;
-        fin.material = finMaterial;
-    }
-
-    // Create small control surfaces near the front
-    const controlMaterial = new StandardMaterial("controlMaterial", scene);
-    controlMaterial.diffuseColor = new Color3(0.6, 0.6, 0.6);
-
-    for (let i = 0; i < 4; i++) {
-        const control = MeshBuilder.CreateBox("control" + i, {
-            width: MISSILE_SIZE / 15,
-            height: MISSILE_SIZE / 2,
-            depth: MISSILE_SIZE / 3
-        }, scene);
-        control.parent = missileMesh;
-        control.position.z = MISSILE_SIZE;
-        // Position control surfaces outward from center
-        const angle = Math.PI / 4 + (i * Math.PI / 2);
-        control.position.x = Math.cos(angle) * (MISSILE_SIZE / 3);
-        control.position.y = Math.sin(angle) * (MISSILE_SIZE / 3);
-        control.rotation.z = angle; // Same pattern as fins
-        // Align with missile body
-        control.rotation.x = Math.PI / 2;
-        control.material = controlMaterial;
-    }
-
-    // Create engine nozzle
-    const nozzle = MeshBuilder.CreateCylinder("nozzle", {
-        height: MISSILE_SIZE / 2,
-        diameterTop: MISSILE_SIZE / 2,
-        diameterBottom: MISSILE_SIZE / 3
-    }, scene);
-    nozzle.parent = missileMesh;
-    nozzle.position.z = -MISSILE_SIZE * 1.5;
-    // Align with missile body
-    nozzle.rotation.x = Math.PI / 2;
-
-    const nozzleMaterial = new StandardMaterial("nozzleMaterial", scene);
-    nozzleMaterial.diffuseColor = new Color3(0.3, 0.3, 0.3);
-    nozzleMaterial.emissiveColor = new Color3(0.1, 0.1, 0.1);
-    nozzle.material = nozzleMaterial;
-
-    // Position and orient the missile
+    // Position the missile
     missileMesh.position = startPosition.clone();
+
+    // Rotate the cylinder to align with the z-axis (cone apex forward)
+    // By default, cylinders in Babylon.js are created along the y-axis
+    missileMesh.rotation.x = Math.PI / 2;
 
     // Look at initial target direction
     const direction = targetPosition.subtract(startPosition);
@@ -484,32 +515,104 @@ const createMissile = (scene: Scene, startPosition: Vector3, targetPosition: Vec
         const rotationMatrix = Matrix.LookAtLH(Vector3.Zero(), direction, upVector);
         rotationMatrix.invert();
         const quaternion = Quaternion.FromRotationMatrix(rotationMatrix);
+        // Clear the rotation before applying quaternion to avoid conflicts
+        missileMesh.rotation.x = 0;
         missileMesh.rotationQuaternion = quaternion;
     }
 
-    // Create smoke trail for the missile
-    const missileTrail = new ParticleSystem("missileTrail", 300, scene);
+    // Create enhanced smoke trail for the missile
+    const missileTrail = new ParticleSystem("missileTrail", 500, scene);
     missileTrail.particleTexture = new Texture("https://raw.githubusercontent.com/BabylonJS/Babylon.js/master/assets/textures/flare.png", scene);
     missileTrail.emitter = missileMesh;
-    missileTrail.minEmitBox = new Vector3(0, 0, -MISSILE_SIZE * 1.5);
-    missileTrail.maxEmitBox = new Vector3(0, 0, -MISSILE_SIZE * 1.5);
+    missileTrail.minEmitBox = new Vector3(0, 0, -MISSILE_SIZE * 1.6); // Emit from inner nozzle
+    missileTrail.maxEmitBox = new Vector3(0, 0, -MISSILE_SIZE * 1.6);
 
-    missileTrail.color1 = new Color4(1, 0.5, 0, 0.2);
-    missileTrail.color2 = new Color4(1, 0.5, 0, 0.2);
-    missileTrail.colorDead = new Color4(0.5, 0.5, 0.5, 0);
+    // Two-stage color for more realistic rocket exhaust
+    missileTrail.color1 = new Color4(1, 0.7, 0.1, 0.8); // Bright yellow-orange core
+    missileTrail.color2 = new Color4(1, 0.3, 0.1, 0.6); // Darker orange-red variation
+    missileTrail.colorDead = new Color4(0.5, 0.5, 0.5, 0); // Fade to gray smoke
 
-    missileTrail.minSize = 0.3;
-    missileTrail.maxSize = 1;
-    missileTrail.minLifeTime = 0.3;
-    missileTrail.maxLifeTime = 0.5;
-    missileTrail.emitRate = 100;
-    missileTrail.blendMode = ParticleSystem.BLENDMODE_STANDARD;
+    // Particle size variation for more dynamic effect
+    missileTrail.minSize = 0.2;
+    missileTrail.maxSize = 1.2;
+
+    // Longer lifetime for trailing smoke effect
+    missileTrail.minLifeTime = 0.2;
+    missileTrail.maxLifeTime = 0.6;
+
+    // Higher emit rate for denser exhaust
+    missileTrail.emitRate = 200;
+
+    // Additive blend mode for brighter core
+    missileTrail.blendMode = ParticleSystem.BLENDMODE_ADD;
+
+    // No gravity effect
     missileTrail.gravity = new Vector3(0, 0, 0);
-    missileTrail.direction1 = new Vector3(-0.1, -0.1, -1);
-    missileTrail.direction2 = new Vector3(0.1, 0.1, -1);
-    missileTrail.minEmitPower = 0.5;
-    missileTrail.maxEmitPower = 1;
-    missileTrail.updateSpeed = 0.01;
+
+    // Wider cone of particles
+    missileTrail.direction1 = new Vector3(-0.15, -0.15, -1);
+    missileTrail.direction2 = new Vector3(0.15, 0.15, -1);
+
+    // Higher emit power for longer trail
+    missileTrail.minEmitPower = 1;
+    missileTrail.maxEmitPower = 2;
+
+    // Faster update for smoother animation
+    missileTrail.updateSpeed = 0.005;
+
+    // Add angular velocity for swirling effect
+    missileTrail.minAngularSpeed = 0;
+    missileTrail.maxAngularSpeed = Math.PI;
+
+    // Create a second particle system for the bright engine core
+    const engineCore = new ParticleSystem("engineCore", 100, scene);
+    engineCore.particleTexture = new Texture("https://raw.githubusercontent.com/BabylonJS/Babylon.js/master/assets/textures/flare.png", scene);
+    engineCore.emitter = missileMesh;
+    engineCore.minEmitBox = new Vector3(0, 0, -MISSILE_SIZE * 1.6);
+    engineCore.maxEmitBox = new Vector3(0, 0, -MISSILE_SIZE * 1.6);
+
+    // Bright white-yellow core
+    engineCore.color1 = new Color4(1, 1, 0.7, 1);
+    engineCore.color2 = new Color4(1, 0.9, 0.5, 1);
+    engineCore.colorDead = new Color4(1, 0.5, 0.2, 0);
+
+    // Small, bright particles
+    engineCore.minSize = 0.1;
+    engineCore.maxSize = 0.4;
+
+    // Very short lifetime for core effect
+    engineCore.minLifeTime = 0.05;
+    engineCore.maxLifeTime = 0.1;
+
+    // High emit rate for solid core appearance
+    engineCore.emitRate = 150;
+
+    // Additive blend for maximum brightness
+    engineCore.blendMode = ParticleSystem.BLENDMODE_ADD;
+
+    // No gravity
+    engineCore.gravity = new Vector3(0, 0, 0);
+
+    // Narrow cone
+    engineCore.direction1 = new Vector3(-0.05, -0.05, -1);
+    engineCore.direction2 = new Vector3(0.05, 0.05, -1);
+
+    // Low power - stays close to nozzle
+    engineCore.minEmitPower = 0.2;
+    engineCore.maxEmitPower = 0.5;
+
+    // Fast update for smooth effect
+    engineCore.updateSpeed = 0.005;
+
+    // Start both particle systems
+    engineCore.start();
+
+    // Link the engine core to the main trail for disposal
+    missileTrail.disposeOnStop = true;
+    engineCore.disposeOnStop = true;
+    missileTrail.onDisposeObservable.add(() => {
+        engineCore.dispose();
+    });
 
     missileTrail.start();
 
@@ -521,20 +624,28 @@ const createMissile = (scene: Scene, startPosition: Vector3, targetPosition: Vec
     if (useBezier) {
         const startToTarget = targetPosition.subtract(startPosition);
         const distance = startToTarget.length();
+        const direction = startToTarget.normalize();
 
-        // Create random control points for the bezier curve
+        // Calculate a midpoint along the direct path
+        const midPoint = startPosition.add(direction.scale(distance * 0.5));
+
+        // Create more controlled bezier points for smoother, more realistic missile paths
+        // Use perpendicular vectors to create a curved path
+        const perpendicular = new Vector3(
+            direction.y, 
+            -direction.x, 
+            direction.z
+        ).normalize();
+
+        // Create a smooth arc by using controlled offsets
+        const curveOffset = distance * 0.2; // 20% of distance for curve height
+
         bezierPoints = [
             startPosition.clone(),
-            startPosition.add(new Vector3(
-                getRandomFloat(-distance/2, distance/2),
-                getRandomFloat(-distance/2, distance/2),
-                getRandomFloat(-distance/2, distance/2)
-            )),
-            targetPosition.add(new Vector3(
-                getRandomFloat(-distance/2, distance/2),
-                getRandomFloat(-distance/2, distance/2),
-                getRandomFloat(-distance/2, distance/2)
-            )),
+            // First control point - slightly ahead of start and a bit to the side
+            startPosition.add(direction.scale(distance * 0.25)).add(perpendicular.scale(curveOffset * 0.5)),
+            // Second control point - past midpoint and to the same side
+            midPoint.add(direction.scale(distance * 0.25)).add(perpendicular.scale(curveOffset)),
             targetPosition.clone()
         ];
     }
@@ -559,61 +670,95 @@ const updateAttacker = (
     scene: Scene,
     currentTime: number
 ): void => {
+    // Define evasion cooldown period (milliseconds)
+    const EVASION_COOLDOWN = 3000; // 3 seconds cooldown between evasions
+
     // Check if any missiles are too close and need evasion
     let closestMissileDistance = Number.MAX_VALUE;
+    let closestMissile: IMissile | null = null;
     let needsEvasion = false;
 
-    for (const missile of missiles) {
-        const distance = Vector3.Distance(attacker.mesh.position, missile.mesh.position);
-        if (distance < closestMissileDistance) {
-            closestMissileDistance = distance;
-        }
+    // Only check for evasion if we're not already evading or if the evasion maneuver has been going on for a while
+    const canEvade = !attacker.isEvading || (currentTime - attacker.lastEvasionTime > attacker.transitionDuration * 0.8);
 
-        if (distance < attacker.evasionThreshold) {
-            needsEvasion = true;
-            break;
+    if (canEvade) {
+        for (const missile of missiles) {
+            const distance = Vector3.Distance(attacker.mesh.position, missile.mesh.position);
+            if (distance < closestMissileDistance) {
+                closestMissileDistance = distance;
+                closestMissile = missile;
+            }
+
+            // Only trigger evasion if the missile is closer than threshold and we're not in cooldown
+            if (distance < attacker.evasionThreshold && 
+                (currentTime - attacker.lastEvasionTime > EVASION_COOLDOWN)) {
+                needsEvasion = true;
+                break;
+            }
         }
     }
 
     // Check if we need to update the target
     let targetUpdated = false;
 
-    // If evasion is needed, set a new random target away from current position
-    if (needsEvasion) {
-        // More drastic evasion the closer the missile is
-        const evasionFactor = Math.max(0.5, Math.min(2, attacker.evasionThreshold / closestMissileDistance));
+    // If evasion is needed, set a new target away from the closest missile
+    if (needsEvasion && closestMissile) {
+        // Calculate direction from missile to attacker
+        const evadeDirection = attacker.mesh.position.subtract(closestMissile.mesh.position);
+        evadeDirection.normalize();
+
+        // More controlled evasion factor - less variation
+        const evasionFactor = Math.max(0.7, Math.min(1.5, attacker.evasionThreshold / closestMissileDistance));
 
         // Save current target before updating
         attacker.currentTarget = attacker.target.clone();
         attacker.targetChangeTime = currentTime;
+        attacker.lastEvasionTime = currentTime;
+        attacker.isEvading = true;
 
-        // Set new evasion target
+        // Set new evasion target - more purposeful by moving away from missile in a clear direction
+        // Use the direction from missile to attacker with minimal randomness
+        const evasionDistance = 60 * evasionFactor; // Increased base evasion distance for more decisive movement
+
+        // Calculate a more structured evasion direction
+        // Add a slight perpendicular component to create a more natural evasive maneuver
+        const perpVector = new Vector3(
+            evadeDirection.y, 
+            -evadeDirection.x, 
+            evadeDirection.z
+        ).normalize().scale(evasionDistance * 0.3); // 30% perpendicular movement
+
         attacker.target = new Vector3(
-            attacker.mesh.position.x + getRandomFloat(-50, 50) * evasionFactor,
-            attacker.mesh.position.y + getRandomFloat(-50, 50) * evasionFactor,
-            attacker.mesh.position.z + getRandomFloat(-50, 50) * evasionFactor
+            attacker.mesh.position.x + evadeDirection.x * evasionDistance + perpVector.x,
+            attacker.mesh.position.y + evadeDirection.y * evasionDistance + perpVector.y,
+            attacker.mesh.position.z + evadeDirection.z * evasionDistance + perpVector.z
         );
 
-        // Use shorter transition for evasive maneuvers
-        attacker.transitionDuration = 1000; // 1 second for evasion
+        // Use longer transition for evasive maneuvers to make them smoother
+        attacker.transitionDuration = 2000; // 2 seconds for smoother evasion
         targetUpdated = true;
 
-        // Reset evasion threshold for next time
-        attacker.evasionThreshold = getRandomFloat(EVASION_THRESHOLD_MIN, EVASION_THRESHOLD_MAX);
+        // Reset evasion threshold for next time - slightly more consistent
+        attacker.evasionThreshold = getRandomFloat(EVASION_THRESHOLD_MIN + 5, EVASION_THRESHOLD_MAX - 5);
     } 
     // Continuously update target to ensure constant movement around the space station
-    // Only if we're close to the target and haven't recently changed targets
-    else if (Vector3.Distance(attacker.mesh.position, attacker.target) < 20 && 
-             (currentTime - attacker.targetChangeTime) > attacker.transitionDuration) {
+    // Check if we're close to the target or if we've been moving toward the same target for too long
+    else if ((Vector3.Distance(attacker.mesh.position, attacker.target) < 25 || 
+             (currentTime - attacker.targetChangeTime) > attacker.transitionDuration * 1.5)) {
 
         // Save current target before updating
         attacker.currentTarget = attacker.target.clone();
         attacker.targetChangeTime = currentTime;
+
+        // Reset evasion state if we were evading
+        if (attacker.isEvading) {
+            attacker.isEvading = false;
+        }
 
         // Generate a new target position that's around the battlestation but at varying distances
         const angle = Math.random() * Math.PI * 2;
         const height = getRandomFloat(-120, 120);
-        const radius = getRandomFloat(100, 250); // Increased minimum radius for smoother paths
+        const radius = getRandomFloat(150, 250); // More consistent radius for smoother paths
 
         // Make the target relative to the battlestation's position
         attacker.target = new Vector3(
@@ -623,20 +768,26 @@ const updateAttacker = (
         );
 
         // Use longer transition for normal movement
-        attacker.transitionDuration = 3000; // 3 seconds for normal transitions
+        attacker.transitionDuration = 3500; // 3.5 seconds for smoother normal transitions
         targetUpdated = true;
     }
-    // Occasionally update target to prevent predictable patterns, but much less frequently
-    else if (Math.random() < 0.002 && (currentTime - attacker.targetChangeTime) > attacker.transitionDuration * 2) {
+    // Very rarely update target to prevent predictable patterns
+    // Extremely low probability to minimize random shaking - only for long-term variation
+    else if (Math.random() < 0.0001 && (currentTime - attacker.targetChangeTime) > attacker.transitionDuration * 5) {
 
         // Save current target before updating
         attacker.currentTarget = attacker.target.clone();
         attacker.targetChangeTime = currentTime;
 
+        // Reset evasion state if we were evading
+        if (attacker.isEvading) {
+            attacker.isEvading = false;
+        }
+
         // Generate a new target position that's around the battlestation but at varying distances
         const angle = Math.random() * Math.PI * 2;
         const height = getRandomFloat(-120, 120);
-        const radius = getRandomFloat(100, 250); // Increased minimum radius for smoother paths
+        const radius = getRandomFloat(180, 300); // More consistent radius range for smoother paths
 
         // Make the target relative to the battlestation's position
         attacker.target = new Vector3(
@@ -646,7 +797,7 @@ const updateAttacker = (
         );
 
         // Use longer transition for random changes
-        attacker.transitionDuration = 4000; // 4 seconds for random transitions
+        attacker.transitionDuration = 7000; // 7 seconds for even smoother random transitions
         targetUpdated = true;
     }
 
