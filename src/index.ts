@@ -26,7 +26,6 @@ const EVASION_THRESHOLD_MAX = 15; // Kept the same for dramatic evasions
 const MISSILE_LIFETIME = 10000; // milliseconds
 const MISSILE_LAUNCH_INTERVAL_MIN = 1000; // milliseconds
 const MISSILE_LAUNCH_INTERVAL_MAX = 3000; // milliseconds
-const PLASMA_SHOT_INTERVAL = 2000; // milliseconds
 const STATION_SIZE = 20;
 const ATTACKER_SIZE = 5;
 const MISSILE_SIZE = 2;
@@ -57,7 +56,6 @@ interface IAttacker {
     speed: number;
     currentSpeed: number;    // For acceleration/deceleration
     evasionThreshold: number;
-    lastShotTime: number;
     lastEvasionTime: number; // When the last evasion maneuver was performed
     isEvading: boolean;      // Whether the attacker is currently evading
 }
@@ -239,25 +237,28 @@ const createStarfield = (scene: Scene): void => {
     starfieldParticles.particleTexture = new Texture("https://raw.githubusercontent.com/BabylonJS/Babylon.js/master/assets/textures/flare.png", scene);
 
     // Use large but finite lifetime values to ensure particles are visible
-    starfieldParticles.minLifeTime = 1000;
-    starfieldParticles.maxLifeTime = 1000;
-    starfieldParticles.minSize = 0.1;
-    starfieldParticles.maxSize = 0.5;
+    starfieldParticles.minLifeTime = 999999; // Very long lifetime so stars don't disappear
+    starfieldParticles.maxLifeTime = 999999;
+    starfieldParticles.minSize = 0.3; // Increased size for better visibility
+    starfieldParticles.maxSize = 1.0; // Increased size for better visibility
     starfieldParticles.emitRate = STAR_COUNT;
     starfieldParticles.minEmitPower = 0;
     starfieldParticles.maxEmitPower = 0;
     starfieldParticles.updateSpeed = 0.01;
 
-    // Create a larger sphere emitter for better visibility
+    // Create a sphere emitter that surrounds the scene
     starfieldParticles.createSphereEmitter(STARFIELD_SIZE, 0);
 
     // Brighter colors for better visibility
-    starfieldParticles.color1 = new Color4(1.0, 1.0, 1.0, 1.0);
-    starfieldParticles.color2 = new Color4(0.9, 0.9, 1.0, 1.0);
+    starfieldParticles.color1 = new Color4(1.0, 1.0, 1.0, 1.0); // Bright white
+    starfieldParticles.color2 = new Color4(0.9, 0.9, 1.0, 1.0); // Slight blue tint
     starfieldParticles.colorDead = new Color4(0.8, 0.8, 1.0, 1.0);
 
     // Set blendMode for better visibility
     starfieldParticles.blendMode = ParticleSystem.BLENDMODE_ADD;
+
+    // Disable particle gravity
+    starfieldParticles.gravity = new Vector3(0, 0, 0);
 
     starfieldParticles.start();
 };
@@ -307,10 +308,7 @@ const createBattlestation = (scene: Scene): Mesh => {
 
         // Orient modules to face outward from center
         const direction = module.position.clone().normalize();
-        const rotationMatrix = Matrix.LookAtLH(Vector3.Zero(), direction, Vector3.Up());
-        rotationMatrix.invert();
-        const quaternion = Quaternion.FromRotationMatrix(rotationMatrix);
-        module.rotationQuaternion = quaternion;
+        module.rotationQuaternion = createRotationQuaternion(direction);
 
         const moduleMaterial = new StandardMaterial("moduleMaterial" + i, scene);
         moduleMaterial.diffuseColor = new Color3(0.6, 0.6, 0.7);
@@ -442,7 +440,6 @@ const createAttacker = (scene: Scene): IAttacker => {
         evasionThreshold: Math.random() < 0.3 
             ? getRandomFloat(EVASION_THRESHOLD_MIN, EVASION_THRESHOLD_MIN + 2)
             : getRandomFloat(EVASION_THRESHOLD_MIN + 3, EVASION_THRESHOLD_MAX),
-        lastShotTime: 0,
         lastEvasionTime: 0,
         isEvading: false
     };
@@ -513,15 +510,7 @@ const createMissile = (scene: Scene, startPosition: Vector3, targetPosition: Vec
     const direction = interceptPoint.subtract(startPosition);
     if (direction.length() > 0.01) {
         // Create a rotation quaternion that will orient the container toward the target
-        const upVector = Vector3.Up();
-        const rotationMatrix = Matrix.LookAtLH(Vector3.Zero(), direction, upVector);
-        rotationMatrix.invert();
-
-        // Convert the rotation matrix to a quaternion
-        const quaternion = Quaternion.FromRotationMatrix(rotationMatrix);
-
-        // Apply the quaternion rotation to the container
-        missileContainer.rotationQuaternion = quaternion;
+        missileContainer.rotationQuaternion = createRotationQuaternion(direction);
     }
 
     // Create enhanced smoke trail for the missile
@@ -827,10 +816,7 @@ const updateAttacker = (
         attacker.mesh.position.addInPlace(direction.scale(attacker.currentSpeed));
 
         // Update rotation to face movement direction - do this smoothly
-        const upVector = Vector3.Up();
-        const rotationMatrix = Matrix.LookAtLH(Vector3.Zero(), direction, upVector);
-        rotationMatrix.invert();
-        const targetQuaternion = Quaternion.FromRotationMatrix(rotationMatrix);
+        const targetQuaternion = createRotationQuaternion(direction);
 
         // If attacker doesn't have a rotation quaternion yet, set it directly
         if (!attacker.mesh.rotationQuaternion) {
@@ -847,120 +833,8 @@ const updateAttacker = (
         }
     }
 
-    // Check if we have a clear shot at the battlestation
-    const distanceToBattlestation = Vector3.Distance(attacker.mesh.position, battlestation.position);
-
-    // More sophisticated line of sight check
-    const directionToBattlestation = battlestation.position.subtract(attacker.mesh.position);
-    directionToBattlestation.normalize();
-
-    // Check if attacker is facing the battlestation (dot product of forward vector and direction to battlestation)
-    const forwardVector = new Vector3(0, 0, 1);
-    const rotatedForward = Vector3.TransformNormal(forwardVector, attacker.mesh.getWorldMatrix());
-    rotatedForward.normalize();
-
-    const dotProduct = Vector3.Dot(rotatedForward, directionToBattlestation);
-
-    // Only fire if we're facing the battlestation (dot product > 0.9 means angle < ~25 degrees)
-    // and we're at a reasonable distance
-    const hasLineOfSight = dotProduct > 0.9 && distanceToBattlestation < 150 && distanceToBattlestation > 30;
-
-    // Fire plasma cannon if we have a clear shot and enough time has passed since last shot
-    if (hasLineOfSight && currentTime - attacker.lastShotTime > PLASMA_SHOT_INTERVAL) {
-        firePlasmaShot(scene, attacker, battlestation);
-        attacker.lastShotTime = currentTime;
-    }
 };
 
-// Fire a plasma shot from the attacker towards the battlestation
-const firePlasmaShot = (scene: Scene, attacker: IAttacker, battlestation: Mesh): void => {
-    // Create a plasma bolt
-    const plasma = MeshBuilder.CreateSphere("plasma", { diameter: 1 }, scene);
-
-    const plasmaMaterial = new StandardMaterial("plasmaMaterial", scene);
-    plasmaMaterial.diffuseColor = new Color3(0, 0.8, 1);
-    plasmaMaterial.emissiveColor = new Color3(0, 0.8, 1);
-    plasmaMaterial.alpha = 0.7;
-    plasma.material = plasmaMaterial;
-
-    // Position at the attacker's position
-    plasma.position = attacker.mesh.position.clone();
-
-    // Create plasma trail
-    const plasmaTrail = new ParticleSystem("plasmaTrail", 200, scene);
-    plasmaTrail.particleTexture = new Texture("https://raw.githubusercontent.com/BabylonJS/Babylon.js/master/assets/textures/flare.png", scene);
-    plasmaTrail.emitter = plasma;
-
-    plasmaTrail.color1 = new Color4(0, 0.8, 1, 0.5);
-    plasmaTrail.color2 = new Color4(0, 0.5, 1, 0.5);
-    plasmaTrail.colorDead = new Color4(0, 0.3, 0.5, 0);
-
-    plasmaTrail.minSize = 0.5;
-    plasmaTrail.maxSize = 1;
-    plasmaTrail.minLifeTime = 0.1;
-    plasmaTrail.maxLifeTime = 0.3;
-    plasmaTrail.emitRate = 100;
-    plasmaTrail.blendMode = ParticleSystem.BLENDMODE_ADD;
-    plasmaTrail.gravity = new Vector3(0, 0, 0);
-    plasmaTrail.minEmitPower = 0.1;
-    plasmaTrail.maxEmitPower = 0.3;
-    plasmaTrail.updateSpeed = 0.01;
-
-    plasmaTrail.start();
-
-    // Calculate direction to battlestation
-    const direction = battlestation.position.subtract(plasma.position);
-    direction.normalize();
-
-    // Animation to move the plasma towards the battlestation
-    scene.onBeforeRenderObservable.add(function plasmaUpdate() {
-        plasma.position.addInPlace(direction.scale(2)); // Faster than missiles
-
-        // Check if plasma has reached the battlestation
-        if (Vector3.Distance(plasma.position, battlestation.position) < STATION_SIZE / 2) {
-            // Create explosion effect
-            const explosion = new ParticleSystem("explosion", 500, scene);
-            explosion.particleTexture = new Texture("https://raw.githubusercontent.com/BabylonJS/Babylon.js/master/assets/textures/flare.png", scene);
-            explosion.emitter = plasma.position;
-
-            explosion.color1 = new Color4(0, 0.8, 1, 1);
-            explosion.color2 = new Color4(0, 0.5, 1, 1);
-            explosion.colorDead = new Color4(0, 0.3, 0.5, 0);
-
-            explosion.minSize = 1;
-            explosion.maxSize = 3;
-            explosion.minLifeTime = 0.3;
-            explosion.maxLifeTime = 0.5;
-            explosion.emitRate = 500;
-            explosion.blendMode = ParticleSystem.BLENDMODE_ADD;
-            explosion.gravity = new Vector3(0, 0, 0);
-            explosion.minEmitPower = 5;
-            explosion.maxEmitPower = 10;
-            explosion.minAngularSpeed = 0;
-            explosion.maxAngularSpeed = Math.PI;
-            explosion.updateSpeed = 0.01;
-
-            explosion.start();
-
-            // Dispose after explosion finishes
-            setTimeout(() => {
-                explosion.dispose();
-            }, 500);
-
-            // Clean up
-            plasmaTrail.dispose();
-            plasma.dispose();
-            scene.onBeforeRenderObservable.removeCallback(plasmaUpdate);
-        }
-
-        // Dispose if it goes too far
-        if (Vector3.Distance(plasma.position, attacker.mesh.position) > 300) {
-            plasmaTrail.dispose();
-            plasma.dispose();
-            scene.onBeforeRenderObservable.removeCallback(plasmaUpdate);
-        }
-    });
-};
 
 // Update all missiles
 const updateMissiles = (missiles: IMissile[], attacker: IAttacker, currentTime: number): void => {
@@ -1112,11 +986,7 @@ const updateMissiles = (missiles: IMissile[], attacker: IAttacker, currentTime: 
                 direction.normalize();
 
                 // Update rotation to face movement direction
-                const upVector = Vector3.Up();
-                const rotationMatrix = Matrix.LookAtLH(Vector3.Zero(), direction, upVector);
-                rotationMatrix.invert();
-                const quaternion = Quaternion.FromRotationMatrix(rotationMatrix);
-                missile.container.rotationQuaternion = quaternion;
+                missile.container.rotationQuaternion = createRotationQuaternion(direction);
             }
 
             // Update missile container position
@@ -1238,6 +1108,13 @@ const getRandomInt = (min: number, max: number): number => {
 // Utility function to get random float between min and max
 const getRandomFloat = (min: number, max: number): number => {
     return Math.random() * (max - min) + min;
+};
+
+// Helper function to create a quaternion rotation from a direction vector
+const createRotationQuaternion = (direction: Vector3, upVector: Vector3 = Vector3.Up()): Quaternion => {
+    const rotationMatrix = Matrix.LookAtLH(Vector3.Zero(), direction, upVector);
+    rotationMatrix.invert();
+    return Quaternion.FromRotationMatrix(rotationMatrix);
 };
 
 // Initialize the scene when the window loads
