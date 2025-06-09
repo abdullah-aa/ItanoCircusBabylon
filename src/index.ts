@@ -70,30 +70,20 @@ const createScene = (canvas: HTMLCanvasElement): Scene => {
 
     // Camera modes
     const CAMERA_MODE = {
-        STATION: 0,
-        ATTACKER: 1,
-        NEUTRAL: 2
+        NEUTRAL: 0,
+        ATTACKER: 1
     };
-    let currentCameraMode = CAMERA_MODE.STATION;
+    let currentCameraMode = CAMERA_MODE.NEUTRAL;
 
-    // We don't need the free camera anymore as we're using the neutral camera for the free view
+    // We don't need the free camera or station camera anymore as we're using the neutral camera for the free view
 
-    // Create arc rotate camera for space station view
-    const stationCamera = new ArcRotateCamera("stationCamera", Math.PI / 2, Math.PI / 2, 100, Vector3.Zero(), scene);
-    stationCamera.setTarget(Vector3.Zero());
-    stationCamera.attachControl(canvas, true);
-    stationCamera.minZ = 0.1;
-    stationCamera.maxZ = 2000;
-    stationCamera.lowerRadiusLimit = 50;
-    stationCamera.upperRadiusLimit = 300;
-
-    // Create follow camera for attacker
+    // Create follow camera for attacker (frontview chase camera)
     const attackerCamera = new FollowCamera("attackerCamera", new Vector3(0, 0, -50), scene);
     attackerCamera.minZ = 0.1;
     attackerCamera.maxZ = 2000;
-    attackerCamera.radius = 50; // Increased distance from the target for better visibility of chasing missiles
-    attackerCamera.heightOffset = 15; // Increased height above the target for better view
-    attackerCamera.rotationOffset = 0; // View head-on (was 180 for view from behind)
+    attackerCamera.radius = 100; // Far distance from the target for frontview chase camera
+    attackerCamera.heightOffset = 30; // Positioned high above the target
+    attackerCamera.rotationOffset = 0; // View from front (frontview)
     attackerCamera.cameraAcceleration = 0.05; // Smoothing
     attackerCamera.maxCameraSpeed = 10; // Speed limit
 
@@ -106,7 +96,8 @@ const createScene = (canvas: HTMLCanvasElement): Scene => {
     neutralCamera.setTarget(Vector3.Zero());
 
     // Set active camera
-    scene.activeCamera = stationCamera;
+    scene.activeCamera = neutralCamera;
+    neutralCamera.attachControl(canvas, true);
 
     // Create lights
     const hemisphericLight = new HemisphericLight("hemisphericLight", new Vector3(0, 1, 0), scene);
@@ -127,13 +118,12 @@ const createScene = (canvas: HTMLCanvasElement): Scene => {
     const attacker = createAttacker(scene);
 
     // Set camera targets
-    stationCamera.setTarget(battlestation.position);
     attackerCamera.lockedTarget = attacker.mesh;
 
     // Add keyboard event listener for camera switching
     const switchCamera = () => {
-        // Cycle through camera modes
-        currentCameraMode = (currentCameraMode + 1) % 3;
+        // Toggle between the two camera modes
+        currentCameraMode = currentCameraMode === CAMERA_MODE.NEUTRAL ? CAMERA_MODE.ATTACKER : CAMERA_MODE.NEUTRAL;
 
         // Detach controls from all cameras
         if (scene.activeCamera) {
@@ -142,18 +132,11 @@ const createScene = (canvas: HTMLCanvasElement): Scene => {
 
         // Set the active camera based on the current mode
         switch (currentCameraMode) {
-            case CAMERA_MODE.STATION:
-                // Update station camera position to look at the battlestation
-                stationCamera.setTarget(battlestation.position);
-                scene.activeCamera = stationCamera;
-                stationCamera.attachControl(canvas, true);
-                console.log("Camera Mode: Space Station View");
-                break;
             case CAMERA_MODE.ATTACKER:
                 // Ensure the follow camera is tracking the attacker
                 attackerCamera.lockedTarget = attacker.mesh;
                 scene.activeCamera = attackerCamera;
-                console.log("Camera Mode: Attacker Front View");
+                console.log("Camera Mode: Attacker Frontview Chase Camera");
                 break;
             case CAMERA_MODE.NEUTRAL:
                 // Set the neutral camera to view the scene
@@ -176,8 +159,6 @@ const createScene = (canvas: HTMLCanvasElement): Scene => {
     const missiles: IMissile[] = [];
 
     // Game loop
-    let lastMissileLaunchTime = 0;
-    let barrageInProgress = false;
     // Initialize nextBarrageTime to current time + a small delay to allow the scene to fully load
     let nextBarrageTime = Date.now() + 2000; // 2 second initial delay
 
@@ -191,9 +172,7 @@ const createScene = (canvas: HTMLCanvasElement): Scene => {
         updateMissiles(missiles, attacker, currentTime);
 
         // Update camera targets if needed
-        if (currentCameraMode === CAMERA_MODE.STATION) {
-            stationCamera.setTarget(battlestation.position);
-        } else if (currentCameraMode === CAMERA_MODE.NEUTRAL) {
+        if (currentCameraMode === CAMERA_MODE.NEUTRAL) {
             // Keep the neutral camera focused on the center of the scene
             neutralCamera.setTarget(Vector3.Zero());
         } else if (currentCameraMode === CAMERA_MODE.ATTACKER) {
@@ -207,8 +186,6 @@ const createScene = (canvas: HTMLCanvasElement): Scene => {
             // Only launch if no missiles are currently active (previous barrage is gone)
             if (missiles.length === 0) {
                 launchMissileBarrage(scene, battlestation, attacker, missiles);
-                lastMissileLaunchTime = currentTime;
-                barrageInProgress = true;
 
                 // Set the next barrage time with a random interval
                 nextBarrageTime = currentTime + getRandomInt(MISSILE_LAUNCH_INTERVAL_MIN, MISSILE_LAUNCH_INTERVAL_MAX);
