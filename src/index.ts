@@ -44,6 +44,7 @@ interface IMissile {
     bezierPoints?: Vector3[];
     bezierTime?: number;
     useBezier: boolean;
+    lastPathUpdateTime?: number; // Track when we last updated the path
 }
 
 interface IAttacker {
@@ -237,8 +238,9 @@ const createStarfield = (scene: Scene): void => {
     const starfieldParticles = new ParticleSystem("starfield", STAR_COUNT, scene);
     starfieldParticles.particleTexture = new Texture("https://raw.githubusercontent.com/BabylonJS/Babylon.js/master/assets/textures/flare.png", scene);
 
-    starfieldParticles.minLifeTime = Number.MAX_SAFE_INTEGER;
-    starfieldParticles.maxLifeTime = Number.MAX_SAFE_INTEGER;
+    // Use large but finite lifetime values to ensure particles are visible
+    starfieldParticles.minLifeTime = 1000;
+    starfieldParticles.maxLifeTime = 1000;
     starfieldParticles.minSize = 0.1;
     starfieldParticles.maxSize = 0.5;
     starfieldParticles.emitRate = STAR_COUNT;
@@ -246,11 +248,16 @@ const createStarfield = (scene: Scene): void => {
     starfieldParticles.maxEmitPower = 0;
     starfieldParticles.updateSpeed = 0.01;
 
+    // Create a larger sphere emitter for better visibility
     starfieldParticles.createSphereEmitter(STARFIELD_SIZE, 0);
 
-    starfieldParticles.color1 = new Color4(0.8, 0.8, 1.0, 1.0);
+    // Brighter colors for better visibility
+    starfieldParticles.color1 = new Color4(1.0, 1.0, 1.0, 1.0);
     starfieldParticles.color2 = new Color4(0.9, 0.9, 1.0, 1.0);
     starfieldParticles.colorDead = new Color4(0.8, 0.8, 1.0, 1.0);
+
+    // Set blendMode for better visibility
+    starfieldParticles.blendMode = ParticleSystem.BLENDMODE_ADD;
 
     starfieldParticles.start();
 };
@@ -484,8 +491,26 @@ const createMissile = (scene: Scene, startPosition: Vector3, targetPosition: Vec
     // Position the container at the start position
     missileContainer.position = startPosition.clone();
 
+    // Calculate a target point along the attacker's current path
+    // This is based on the attacker's velocity and the missile's velocity
+    const attackerDirection = targetPosition.subtract(startPosition);
+    attackerDirection.normalize();
+
+    // Calculate a point ahead of the attacker based on velocities
+    // The higher the missile speed relative to attacker speed, the closer the interception point
+    const speedRatio = MISSILE_SPEED / ATTACKER_SPEED;
+    const distanceToTarget = Vector3.Distance(startPosition, targetPosition);
+    // Limit the intercept distance to prevent targeting points too far ahead
+    const rawInterceptDistance = distanceToTarget / speedRatio;
+    // Cap the intercept distance to a reasonable value relative to the current distance
+    const maxInterceptDistance = Math.min(distanceToTarget * 0.5, 30);
+    const interceptDistance = Math.min(rawInterceptDistance, maxInterceptDistance);
+
+    // Calculate the interception point along the attacker's path
+    const interceptPoint = targetPosition.add(attackerDirection.scale(interceptDistance));
+
     // Look at initial target direction
-    const direction = targetPosition.subtract(startPosition);
+    const direction = interceptPoint.subtract(startPosition);
     if (direction.length() > 0.01) {
         // Create a rotation quaternion that will orient the container toward the target
         const upVector = Vector3.Up();
@@ -600,19 +625,23 @@ const createMissile = (scene: Scene, startPosition: Vector3, targetPosition: Vec
     // All missiles use bezier paths for more interesting movement
     const useBezier = true;
 
-    // Create bezier path from start to target position
-    const bezierPoints = createBezierPath(startPosition, targetPosition);
+    // Create random bezier path from start to intercept point
+    const bezierPoints = createBezierPath(startPosition, interceptPoint);
+
+    // Random initial speed for more varied missile behavior
+    const initialSpeed = MISSILE_SPEED * getRandomFloat(0.8, 1.2);
 
     return {
         mesh: missileMesh,
         container: missileContainer,
         trail: missileTrail,
-        target: targetPosition.clone(),
-        speed: MISSILE_SPEED * getRandomFloat(0.8, 1.2), // Slight speed variation
+        target: interceptPoint.clone(), // Target the intercept point, not the attacker directly
+        speed: initialSpeed, // Random initial speed
         lifetime: Date.now() + MISSILE_LIFETIME,
         bezierPoints,
         bezierTime: 0,
-        useBezier
+        useBezier,
+        lastPathUpdateTime: Date.now() // Track when we last updated the path
     };
 };
 
@@ -935,11 +964,47 @@ const firePlasmaShot = (scene: Scene, attacker: IAttacker, battlestation: Mesh):
 
 // Update all missiles
 const updateMissiles = (missiles: IMissile[], attacker: IAttacker, currentTime: number): void => {
+    // Define constants for path recalculation
+    const PATH_UPDATE_INTERVAL_MIN = 2500; // Minimum time between path updates (ms)
+    const PATH_UPDATE_INTERVAL_MAX = 5000; // Maximum time between path updates (ms)
+
     for (let i = missiles.length - 1; i >= 0; i--) {
         const missile = missiles[i];
 
         // Check if missile has expired
         if (currentTime > missile.lifetime) {
+            // Create explosion effect for expired missile
+            const explosion = new ParticleSystem("explosion", 300, missile.container.getScene());
+            explosion.particleTexture = new Texture("https://raw.githubusercontent.com/BabylonJS/Babylon.js/master/assets/textures/flare.png", missile.container.getScene());
+            explosion.emitter = missile.container.position;
+
+            // Use slightly different colors for lifetime expiration explosion (more orange/yellow than red)
+            explosion.color1 = new Color4(1, 0.7, 0.1, 1);
+            explosion.color2 = new Color4(1, 0.5, 0.1, 1);
+            explosion.colorDead = new Color4(0.5, 0.3, 0.1, 0);
+
+            // Slightly smaller explosion than collision
+            explosion.minSize = 0.8;
+            explosion.maxSize = 2.5;
+            explosion.minLifeTime = 0.2;
+            explosion.maxLifeTime = 0.4;
+            explosion.emitRate = 400;
+            explosion.blendMode = ParticleSystem.BLENDMODE_ADD;
+            explosion.gravity = new Vector3(0, 0, 0);
+            explosion.minEmitPower = 4;
+            explosion.maxEmitPower = 8;
+            explosion.minAngularSpeed = 0;
+            explosion.maxAngularSpeed = Math.PI;
+            explosion.updateSpeed = 0.01;
+
+            explosion.start();
+
+            // Dispose after explosion finishes
+            setTimeout(() => {
+                explosion.dispose();
+            }, 500);
+
+            // Remove the missile
             missile.trail.dispose();
             missile.mesh.dispose();
             missile.container.dispose();
@@ -947,8 +1012,68 @@ const updateMissiles = (missiles: IMissile[], attacker: IAttacker, currentTime: 
             continue;
         }
 
-        // Update target to current attacker position
-        missile.target = attacker.mesh.position.clone();
+        // Calculate distance to attacker for dynamic adjustments
+        const distanceToAttacker = Vector3.Distance(missile.container.position, attacker.mesh.position);
+
+        // Check if it's time to recalculate the flight path
+        const timeSinceLastUpdate = currentTime - (missile.lastPathUpdateTime || 0);
+        const shouldUpdatePath = 
+            timeSinceLastUpdate > getRandomInt(PATH_UPDATE_INTERVAL_MIN, PATH_UPDATE_INTERVAL_MAX) ||
+            (missile.bezierTime && missile.bezierTime >= 1) ||
+            (distanceToAttacker < 50 && Math.random() < 0.1); // Higher chance to update when close
+
+        if (shouldUpdatePath) {
+            // Calculate a new target point along the attacker's current path
+            // Get attacker's current direction
+            const attackerDirection = attacker.mesh.getDirection(new Vector3(0, 0, 1));
+
+            // Calculate a point ahead of the attacker based on velocities
+            // The higher the missile speed relative to attacker speed, the closer the interception point
+            const speedRatio = missile.speed / attacker.currentSpeed;
+            // Limit the intercept distance to prevent targeting points too far ahead
+            const rawInterceptDistance = distanceToAttacker / speedRatio;
+            // Cap the intercept distance to a reasonable value relative to the current distance
+            const maxInterceptDistance = Math.min(distanceToAttacker * 0.5, 30);
+            const interceptDistance = Math.min(rawInterceptDistance, maxInterceptDistance);
+
+            // Calculate the interception point along the attacker's path
+            const interceptPoint = attacker.mesh.position.clone().add(attackerDirection.scale(interceptDistance));
+
+            // Update the missile's target to the new intercept point
+            missile.target = interceptPoint.clone();
+
+            // Change missile velocity randomly
+            missile.speed = MISSILE_SPEED * getRandomFloat(0.8, 1.5);
+
+            // Create a new random bezier path from current position to the new target
+            if (distanceToAttacker < 30) {
+                // Create a more direct and aggressive path when close
+                const toTarget = missile.target.subtract(missile.container.position);
+                const direction = toTarget.normalize();
+
+                // More direct approach with sharper turns
+                missile.bezierPoints = [
+                    missile.container.position.clone(),
+                    // First control point - closer to direct line
+                    missile.container.position.add(direction.scale(distanceToAttacker * 0.3)),
+                    // Second control point - very close to target
+                    missile.target.subtract(direction.scale(distanceToAttacker * 0.1)),
+                    missile.target.clone()
+                ];
+            } else {
+                // Normal bezier path for farther missiles
+                missile.bezierPoints = createBezierPath(
+                    missile.container.position.clone(),
+                    missile.target.clone()
+                );
+            }
+
+            // Reset bezier time for the new path
+            missile.bezierTime = 0;
+
+            // Update the last path update time
+            missile.lastPathUpdateTime = currentTime;
+        }
 
         // All missiles use bezier paths
         if (missile.bezierPoints) {
@@ -956,9 +1081,6 @@ const updateMissiles = (missiles: IMissile[], attacker: IAttacker, currentTime: 
             if (missile.bezierTime === undefined) {
                 missile.bezierTime = 0;
             }
-
-            // Calculate distance to attacker for dynamic adjustments
-            const distanceToAttacker = Vector3.Distance(missile.container.position, attacker.mesh.position);
 
             // Adjust missile speed based on distance to attacker
             let currentSpeed = missile.speed;
@@ -974,50 +1096,6 @@ const updateMissiles = (missiles: IMissile[], attacker: IAttacker, currentTime: 
 
             // Advance along the bezier curve with adjusted speed
             missile.bezierTime += currentSpeed * 0.01;
-
-            // Dramatically increase adjustment chance as missile gets closer to attacker
-            // This creates more erratic and aggressive course corrections when close
-            let adjustmentChance;
-
-            if (distanceToAttacker < 20) {
-                // Very close - high chance of dramatic course correction
-                adjustmentChance = 0.2;
-            } else if (distanceToAttacker < 50) {
-                // Moderately close - increased chance of course correction
-                adjustmentChance = 0.1;
-            } else {
-                // Far away - normal adjustment based on bezier time
-                adjustmentChance = Math.min(0.01, missile.bezierTime * 0.02);
-            }
-
-            if (Math.random() < adjustmentChance || missile.bezierTime >= 1) {
-                // Generate a new bezier path from current position to target
-                // Use more aggressive path generation for close missiles
-                if (distanceToAttacker < 30) {
-                    // Create a more direct and aggressive path when close
-                    const toTarget = missile.target.subtract(missile.container.position);
-                    const direction = toTarget.normalize();
-
-                    // More direct approach with sharper turns
-                    missile.bezierPoints = [
-                        missile.container.position.clone(),
-                        // First control point - closer to direct line
-                        missile.container.position.add(direction.scale(distanceToAttacker * 0.3)),
-                        // Second control point - very close to target
-                        missile.target.subtract(direction.scale(distanceToAttacker * 0.1)),
-                        missile.target.clone()
-                    ];
-                } else {
-                    // Normal bezier path for farther missiles
-                    missile.bezierPoints = createBezierPath(
-                        missile.container.position.clone(),
-                        missile.target.clone()
-                    );
-                }
-
-                // Reset bezier time for the new path
-                missile.bezierTime = 0;
-            }
 
             // Calculate position on bezier curve
             const newPosition = calculateBezierPoint(
@@ -1114,24 +1192,25 @@ const createBezierPath = (startPos: Vector3, targetPos: Vector3): Vector3[] => {
     // Normalize and add some random variation to the perpendicular vector
     perpendicular.normalize();
 
-    // Add a small random component to make paths even more diverse
-    perpendicular.x += getRandomFloat(-0.2, 0.2);
-    perpendicular.y += getRandomFloat(-0.2, 0.2);
-    perpendicular.z += getRandomFloat(-0.2, 0.2);
+    // Add a larger random component to make paths more varied and windy
+    perpendicular.x += getRandomFloat(-0.3, 0.3);
+    perpendicular.y += getRandomFloat(-0.3, 0.3);
+    perpendicular.z += getRandomFloat(-0.3, 0.3);
     perpendicular.normalize();
 
-    // Randomize the curve offset for more varied paths - much wider range
-    const curveOffset = distance * getRandomFloat(0.2, 0.5);
+    // Increase the curve offset for more windy paths
+    // Use a larger multiplier to create more extreme curves
+    const curveOffset = distance * getRandomFloat(0.25, 0.5);
 
-    // Create bezier points with more variation
+    // Create bezier points with more variation for windier paths
     return [
         startPos.clone(),
-        // First control point - with randomized distance and offset
-        startPos.add(direction.scale(distance * getRandomFloat(0.2, 0.4)))
-               .add(perpendicular.scale(curveOffset * getRandomFloat(0.3, 0.7))),
-        // Second control point - with randomized distance and offset
-        midPoint.add(direction.scale(distance * getRandomFloat(0.1, 0.3)))
-               .add(perpendicular.scale(curveOffset * getRandomFloat(0.7, 1.0))),
+        // First control point - with more extreme randomization
+        startPos.add(direction.scale(distance * getRandomFloat(0.15, 0.3)))
+               .add(perpendicular.scale(curveOffset * getRandomFloat(0.5, 1.0))),
+        // Second control point - with more extreme randomization
+        midPoint.add(direction.scale(distance * getRandomFloat(0.1, 0.25)))
+               .add(perpendicular.scale(curveOffset * getRandomFloat(0.6, 1.2))),
         targetPos.clone()
     ];
 };
