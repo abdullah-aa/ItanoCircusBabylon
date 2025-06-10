@@ -18,6 +18,8 @@ import {
     FollowCamera
 } from '@babylonjs/core';
 
+import { ASSETS } from './assets.ts'
+
 // Constants
 const MISSILE_SPEED = 1.5; // Increased for more effective pursuit
 const ATTACKER_SPEED = 1.5;
@@ -233,34 +235,53 @@ const createScene = (canvas: HTMLCanvasElement): Scene => {
 
 // Create starfield with particles
 const createStarfield = (scene: Scene): void => {
-    const starfieldParticles = new ParticleSystem("starfield", STAR_COUNT, scene);
-    starfieldParticles.particleTexture = new Texture("https://raw.githubusercontent.com/BabylonJS/Babylon.js/master/assets/textures/flare.png", scene);
+    const particleSystem = new ParticleSystem("starfield", STAR_COUNT, scene);
 
-    // Use large but finite lifetime values to ensure particles are visible
-    starfieldParticles.minLifeTime = 999999; // Very long lifetime so stars don't disappear
-    starfieldParticles.maxLifeTime = 999999;
-    starfieldParticles.minSize = 0.3; // Increased size for better visibility
-    starfieldParticles.maxSize = 1.0; // Increased size for better visibility
-    starfieldParticles.emitRate = STAR_COUNT;
-    starfieldParticles.minEmitPower = 0;
-    starfieldParticles.maxEmitPower = 0;
-    starfieldParticles.updateSpeed = 0.01;
+    // Set the texture for the particles
+    const texture = ASSETS.get('Flare2.png');
+    if (typeof texture === 'string') {
+        particleSystem.particleTexture = new Texture(texture, scene);
+    }
 
-    // Create a sphere emitter that surrounds the scene
-    starfieldParticles.createSphereEmitter(STARFIELD_SIZE, 0);
+    // Where the particles come from
+    particleSystem.emitter = new Vector3(0, 0, 0); // Center of the scene
 
-    // Brighter colors for better visibility
-    starfieldParticles.color1 = new Color4(1.0, 1.0, 1.0, 1.0); // Bright white
-    starfieldParticles.color2 = new Color4(0.9, 0.9, 1.0, 1.0); // Slight blue tint
-    starfieldParticles.colorDead = new Color4(0.8, 0.8, 1.0, 1.0);
+    // Emission box - particles emitted from anywhere within this box
+    particleSystem.minEmitBox = new Vector3(-STARFIELD_SIZE / 2, -STARFIELD_SIZE / 2, -STARFIELD_SIZE / 2);
+    particleSystem.maxEmitBox = new Vector3(STARFIELD_SIZE / 2, STARFIELD_SIZE / 2, STARFIELD_SIZE / 2);
 
-    // Set blendMode for better visibility
-    starfieldParticles.blendMode = ParticleSystem.BLENDMODE_ADD;
+    // Colors of particles
+    particleSystem.color1 = new Color4(0.8, 0.8, 0.8, 1.0); // White stars
+    particleSystem.color2 = new Color4(0.9, 0.9, 0.9, 1.0); // Slightly brighter white stars
+    particleSystem.colorDead = new Color4(0.7, 0.7, 0.7, 0.0); // Fade to gray
 
-    // Disable particle gravity
-    starfieldParticles.gravity = new Vector3(0, 0, 0);
+    // Size of particles
+    particleSystem.minSize = 0.5;
+    particleSystem.maxSize = 1.5;
 
-    starfieldParticles.start();
+    // Life time of particles
+    particleSystem.minLifeTime = Number.MAX_VALUE; // Stars live forever
+    particleSystem.maxLifeTime = Number.MAX_VALUE;
+
+    // Emission rate
+    particleSystem.emitRate = STAR_COUNT; // Emit all stars at once
+
+    // Blend mode
+    particleSystem.blendMode = ParticleSystem.BLENDMODE_ONEONE; // Additive blending for brightness
+
+    // Set the gravity of all particles
+    particleSystem.gravity = new Vector3(0, 0, 0); // No gravity in space
+
+    // Direction of particles
+    particleSystem.direction1 = new Vector3(0, 0, 0); // No initial direction
+    particleSystem.direction2 = new Vector3(0, 0, 0);
+
+    // Power of particles
+    particleSystem.minEmitPower = 0;
+    particleSystem.maxEmitPower = 0;
+
+    // Start the particle system
+    particleSystem.start();
 };
 
 // Create the battlestation
@@ -390,7 +411,10 @@ const createAttacker = (scene: Scene): IAttacker => {
 
     // Create smoke trail for the attacker
     const attackerTrail = new ParticleSystem("attackerTrail", 500, scene);
-    attackerTrail.particleTexture = new Texture("https://raw.githubusercontent.com/BabylonJS/Babylon.js/master/assets/textures/flare.png", scene);
+    const attackerTrailTexture = ASSETS.get('flare.png');
+    if (typeof attackerTrailTexture === 'string') {
+        attackerTrail.particleTexture = new Texture(attackerTrailTexture, scene);
+    }
     attackerTrail.emitter = attackerMesh;
     attackerTrail.minEmitBox = new Vector3(-0.5, -0.5, -2);
     attackerTrail.maxEmitBox = new Vector3(0.5, 0.5, -2);
@@ -515,7 +539,10 @@ const createMissile = (scene: Scene, startPosition: Vector3, targetPosition: Vec
 
     // Create enhanced smoke trail for the missile
     const missileTrail = new ParticleSystem("missileTrail", 500, scene);
-    missileTrail.particleTexture = new Texture("https://raw.githubusercontent.com/BabylonJS/Babylon.js/master/assets/textures/flare.png", scene);
+    const missileTrailTexture = ASSETS.get('flare3.png')
+    if (typeof missileTrailTexture === 'string') {
+        missileTrail.particleTexture = new Texture(missileTrailTexture, scene);
+    }
     missileTrail.emitter = missileMesh;
     // Adjust emit box to account for the rotated missile mesh
     missileTrail.minEmitBox = new Vector3(0, -MISSILE_SIZE * 1.6, 0); // Emit from inner nozzle
@@ -557,57 +584,6 @@ const createMissile = (scene: Scene, startPosition: Vector3, targetPosition: Vec
     // Add angular velocity for swirling effect
     missileTrail.minAngularSpeed = 0;
     missileTrail.maxAngularSpeed = Math.PI;
-
-    // Create a second particle system for the bright engine core
-    const engineCore = new ParticleSystem("engineCore", 100, scene);
-    engineCore.particleTexture = new Texture("https://raw.githubusercontent.com/BabylonJS/Babylon.js/master/assets/textures/flare.png", scene);
-    engineCore.emitter = missileMesh;
-    // Adjust emit box to account for the rotated missile mesh
-    engineCore.minEmitBox = new Vector3(0, -MISSILE_SIZE * 1.6, 0);
-    engineCore.maxEmitBox = new Vector3(0, -MISSILE_SIZE * 1.6, 0);
-
-    // Bright white-yellow core
-    engineCore.color1 = new Color4(1, 1, 0.7, 1);
-    engineCore.color2 = new Color4(1, 0.9, 0.5, 1);
-    engineCore.colorDead = new Color4(1, 0.5, 0.2, 0);
-
-    // Small, bright particles
-    engineCore.minSize = 0.1;
-    engineCore.maxSize = 0.4;
-
-    // Very short lifetime for core effect
-    engineCore.minLifeTime = 0.05;
-    engineCore.maxLifeTime = 0.1;
-
-    // High emit rate for solid core appearance
-    engineCore.emitRate = 150;
-
-    // Additive blend for maximum brightness
-    engineCore.blendMode = ParticleSystem.BLENDMODE_ADD;
-
-    // No gravity
-    engineCore.gravity = new Vector3(0, 0, 0);
-
-    // Narrow cone
-    engineCore.direction1 = new Vector3(-0.05, -0.05, -1);
-    engineCore.direction2 = new Vector3(0.05, 0.05, -1);
-
-    // Low power - stays close to nozzle
-    engineCore.minEmitPower = 0.2;
-    engineCore.maxEmitPower = 0.5;
-
-    // Fast update for smooth effect
-    engineCore.updateSpeed = 0.005;
-
-    // Start both particle systems
-    engineCore.start();
-
-    // Link the engine core to the main trail for disposal
-    missileTrail.disposeOnStop = true;
-    engineCore.disposeOnStop = true;
-    missileTrail.onDisposeObservable.add(() => {
-        engineCore.dispose();
-    });
 
     missileTrail.start();
 
@@ -849,13 +825,11 @@ const updateMissiles = (missiles: IMissile[], attacker: IAttacker, currentTime: 
         if (currentTime > missile.lifetime) {
             // Create explosion effect for expired missile
             const explosion = new ParticleSystem("explosion", 300, missile.container.getScene());
-            explosion.particleTexture = new Texture("https://raw.githubusercontent.com/BabylonJS/Babylon.js/master/assets/textures/flare.png", missile.container.getScene());
+            const durationExplosionTexture = ASSETS.get('cloud.png');
+            if (typeof durationExplosionTexture === 'string') {
+                explosion.particleTexture = new Texture(durationExplosionTexture, missile.container.getScene());
+            }
             explosion.emitter = missile.container.position;
-
-            // Use slightly different colors for lifetime expiration explosion (more orange/yellow than red)
-            explosion.color1 = new Color4(1, 0.7, 0.1, 1);
-            explosion.color2 = new Color4(1, 0.5, 0.1, 1);
-            explosion.colorDead = new Color4(0.5, 0.3, 0.1, 0);
 
             // Slightly smaller explosion than collision
             explosion.minSize = 0.8;
@@ -997,7 +971,10 @@ const updateMissiles = (missiles: IMissile[], attacker: IAttacker, currentTime: 
         if (Vector3.Distance(missile.container.position, attacker.mesh.position) < ATTACKER_SIZE / 2) {
             // Create explosion effect
             const explosion = new ParticleSystem("explosion", 500, missile.container.getScene());
-            explosion.particleTexture = new Texture("https://raw.githubusercontent.com/BabylonJS/Babylon.js/master/assets/textures/flare.png", missile.container.getScene());
+            const proximityExplosionTexture = ASSETS.get('fire.png');
+            if (typeof proximityExplosionTexture === 'string') {
+                explosion.particleTexture = new Texture(proximityExplosionTexture, missile.container.getScene());
+            }
             explosion.emitter = missile.container.position;
 
             explosion.color1 = new Color4(1, 0.5, 0, 1);

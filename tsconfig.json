@@ -1,12 +1,20 @@
 {
   "compilerOptions": {
-    "target": "es2016",
-    "module": "commonjs",
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true,
+    /* Build Options */
+    "target": "es6", // Target modern JS, let webpack/babel handle older browser support
+    "module": "esnext", // Let webpack handle the module system
+    "moduleResolution": "node", // Standard module resolution
+    "allowImportingTsExtensions": true, // This is now safe to use
+    "noEmit": true, // CRITICAL: This solves the error. Don't create .js files.
+    "isolatedModules": true, // Good practice with transpilers like Babel/ts-loader
+
+    /* Type-Checking Options */
     "strict": true,
     "skipLibCheck": true,
-    "outDir": "dist"
+
+    /* Interop Options */
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true
   },
-  "include": ["src"]
+  "include": ["src"] // Or wherever your source code is
 }

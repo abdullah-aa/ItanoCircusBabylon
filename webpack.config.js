@@ -1,4 +1,5 @@
 const path = require('path');
+const ForkTsCheckerWebpackPlugin = require('fork-ts-checker-webpack-plugin');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 
 module.exports = {
@@ -7,6 +8,7 @@ module.exports = {
   output: {
     filename: 'bundle.js',
     path: path.resolve(__dirname, 'dist'),
+    clean: true
   },
   resolve: {
     extensions: ['.ts', '.js'],
@@ -15,7 +17,16 @@ module.exports = {
     rules: [
       {
         test: /\.ts$/,
-        use: 'ts-loader',
+        use: [
+          {
+            loader: 'ts-loader',
+            options: {
+              // This is the key change!
+              // It tells ts-loader to only transpile and not do type checking.
+              transpileOnly: true,
+            },
+          },
+        ],
         exclude: /node_modules/,
       },
     ],
@@ -25,6 +36,7 @@ module.exports = {
       template: 'src/index.html',
       filename: 'index.html',
     }),
+    new ForkTsCheckerWebpackPlugin(),
   ],
   devServer: {
     static: {
