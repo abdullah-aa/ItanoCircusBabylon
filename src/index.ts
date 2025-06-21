@@ -22,7 +22,7 @@ import { ASSETS } from './assets.ts'
 const MAPPED_ASSETS = ASSETS as Map<string, string>;
 
 // Constants
-const MISSILE_SPEED = 1.5; // Increased for more effective pursuit
+const MISSILE_SPEED = 2.5; // Increased for more effective pursuit
 const ATTACKER_SPEED = 1.5;
 const EVASION_THRESHOLD_MIN = 3;  // Further reduced to allow some missiles to get close enough to explode
 const EVASION_THRESHOLD_MAX = 15; // Kept the same for dramatic evasions
@@ -87,7 +87,7 @@ const createScene = (canvas: HTMLCanvasElement): Scene => {
     const attackerCamera = new FollowCamera("attackerCamera", new Vector3(0, 0, -50), scene);
     attackerCamera.minZ = 0.1;
     attackerCamera.maxZ = 2000;
-    attackerCamera.radius = 100; // Far distance from the target for frontview chase camera
+    attackerCamera.radius = 150; // Far distance from the target for frontview chase camera
     attackerCamera.heightOffset = 30; // Positioned high above the target
     attackerCamera.rotationOffset = 0; // View from front (frontview)
     attackerCamera.cameraAcceleration = 0.05; // Smoothing
@@ -97,7 +97,7 @@ const createScene = (canvas: HTMLCanvasElement): Scene => {
     const attackerSideCamera = new FollowCamera("attackerSideCamera", new Vector3(0, 0, -50), scene);
     attackerSideCamera.minZ = 0.1;
     attackerSideCamera.maxZ = 2000;
-    attackerSideCamera.radius = 80; // Slightly closer than front view
+    attackerSideCamera.radius = 120; // Slightly closer than front view
     attackerSideCamera.heightOffset = 15; // Not as high as front view
     attackerSideCamera.rotationOffset = 90; // 90 degrees for side view
     attackerSideCamera.cameraAcceleration = 0.05; // Smoothing
@@ -959,13 +959,26 @@ const updateMissiles = (missiles: IMissile[], attacker: IAttacker, currentTime: 
                 const toTarget = missile.target.subtract(missile.container.position);
                 const direction = toTarget.normalize();
 
-                // More direct approach with sharper turns
+                // More curved approach even when close
+                // Create a perpendicular vector for the curve
+                const perpVector = new Vector3(direction.y, -direction.x, direction.z).normalize();
+                // Add random variation to perpendicular vector
+                perpVector.x += getRandomFloat(-0.2, 0.2);
+                perpVector.y += getRandomFloat(-0.2, 0.2);
+                perpVector.z += getRandomFloat(-0.2, 0.2);
+                perpVector.normalize();
+
+                // Calculate curve offset based on distance
+                const curveOffset = distanceToAttacker * getRandomFloat(0.3, 0.5);
+
                 const singleBezierPath = [
                     missile.container.position.clone(),
-                    // First control point - closer to direct line
-                    missile.container.position.add(direction.scale(distanceToAttacker * 0.3)),
-                    // Second control point - very close to target
-                    missile.target.subtract(direction.scale(distanceToAttacker * 0.1)),
+                    // First control point - with perpendicular offset
+                    missile.container.position.add(direction.scale(distanceToAttacker * 0.3))
+                                           .add(perpVector.scale(curveOffset)),
+                    // Second control point - with opposite perpendicular offset
+                    missile.target.subtract(direction.scale(distanceToAttacker * 0.2))
+                               .subtract(perpVector.scale(curveOffset * 0.7)),
                     missile.target.clone()
                 ];
 
@@ -1110,7 +1123,7 @@ const createBezierPath = (startPos: Vector3, targetPos: Vector3): Vector3[] => {
 
     // Increase the curve offset for more windy paths
     // Use a larger multiplier to create more extreme curves
-    const curveOffset = distance * getRandomFloat(0.25, 0.5);
+    const curveOffset = distance * getRandomFloat(0.4, 0.7);
 
     // Create bezier points with more variation for windier paths
     return [
@@ -1157,7 +1170,7 @@ const createMultiBezierPath = (startPos: Vector3, targetPos: Vector3): Vector3[]
         perpVector.normalize();
 
         // Add random perpendicular offset
-        const perpOffset = totalDistance * getRandomFloat(0.1, 0.3);
+        const perpOffset = totalDistance * getRandomFloat(0.2, 0.5);
 
         // Create intermediate point
         const intermediatePoint = startPos.add(direction.scale(totalDistance * segmentPosition))
