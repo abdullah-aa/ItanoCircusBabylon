@@ -178,6 +178,14 @@ const createScene = (canvas: HTMLCanvasElement): Scene => {
         }
     });
 
+    // Add touch event listener for mobile devices
+    canvas.addEventListener("touchstart", (event) => {
+        // Prevent default behavior to avoid scrolling
+        event.preventDefault();
+        // Switch camera on tap
+        switchCamera();
+    }, { passive: false });
+
     // Array to store active missiles
     const missiles: IMissile[] = [];
 

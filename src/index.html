@@ -17,9 +17,46 @@
             height: 100%;
             touch-action: none;
         }
+        #mobileInstructions {
+            position: fixed;
+            bottom: 20px;
+            left: 0;
+            width: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            text-align: center;
+            padding: 10px;
+            font-family: Arial, sans-serif;
+            z-index: 1000;
+            transition: opacity 1s ease-in-out;
+        }
+        @media (hover: none) and (pointer: coarse) {
+            /* Only show on touch devices */
+            #mobileInstructions {
+                display: block;
+            }
+        }
+        @media (hover: hover) and (pointer: fine) {
+            /* Hide on non-touch devices */
+            #mobileInstructions {
+                display: none;
+            }
+        }
     </style>
 </head>
 <body>
     <canvas id="renderCanvas"></canvas>
+    <div id="mobileInstructions">Tap anywhere on screen to change camera view</div>
+    <script>
+        // Hide mobile instructions after a delay
+        document.addEventListener('DOMContentLoaded', function() {
+            setTimeout(function() {
+                const instructions = document.getElementById('mobileInstructions');
+                if (instructions) {
+                    instructions.classList.add('fadeOut');
+                }
+            }, 5000); // Hide after 5 seconds
+        });
+    </script>
 </body>
 </html>
