@@ -22,7 +22,7 @@ import { ASSETS } from './assets.ts'
 const MAPPED_ASSETS = ASSETS as Map<string, string>;
 
 // Constants
-const MISSILE_SPEED = 2.5; // Increased for more effective pursuit
+const MISSILE_SPEED = 2; // Increased for more effective pursuit
 const ATTACKER_SPEED = 1.5;
 const EVASION_THRESHOLD_MIN = 3;  // Further reduced to allow some missiles to get close enough to explode
 const EVASION_THRESHOLD_MAX = 15; // Kept the same for dramatic evasions
@@ -542,15 +542,15 @@ const createMissile = (scene: Scene, startPosition: Vector3, targetPosition: Vec
     const attackerDirection = targetPosition.subtract(startPosition);
     attackerDirection.normalize();
 
-    // Calculate a point ahead of the attacker based on velocities
-    // The higher the missile speed relative to attacker speed, the closer the interception point
+    // Calculate a point significantly ahead of the attacker to create overshoot
+    // The higher the missile speed relative to attacker speed, the further the interception point
     const speedRatio = MISSILE_SPEED / ATTACKER_SPEED;
     const distanceToTarget = Vector3.Distance(startPosition, targetPosition);
-    // Limit the intercept distance to prevent targeting points too far ahead
+    // Calculate a much larger intercept distance to ensure significant overshooting
     const rawInterceptDistance = distanceToTarget / speedRatio;
-    // Cap the intercept distance to a reasonable value relative to the current distance
-    const maxInterceptDistance = Math.min(distanceToTarget * 0.5, 30);
-    const interceptDistance = Math.min(rawInterceptDistance, maxInterceptDistance);
+    // Allow for much larger intercept distances (3x the original distance and up to 120 units)
+    const maxInterceptDistance = Math.min(distanceToTarget * 1.5, 120);
+    const interceptDistance = Math.min(rawInterceptDistance * 2, maxInterceptDistance);
 
     // Calculate the interception point along the attacker's path
     const interceptPoint = targetPosition.add(attackerDirection.scale(interceptDistance));
@@ -931,17 +931,17 @@ const updateMissiles = (missiles: IMissile[], attacker: IAttacker, currentTime: 
             const attackerDirection = attacker.mesh.getDirection(new Vector3(0, 0, 1));
 
             // Calculate a random distance in front of the attacker
-            // Farther distance when missile is far away, closer when missile is near
+            // Significantly increased distances to make missiles overshoot the attacker
             let interceptDistance;
             if (distanceToAttacker < 30) {
-                // When close, target a point closer to the attacker
-                interceptDistance = getRandomFloat(10, 20);
+                // When close, still overshoot significantly
+                interceptDistance = getRandomFloat(60, 100);
             } else if (distanceToAttacker < 80) {
-                // Medium distance
-                interceptDistance = getRandomFloat(20, 40);
+                // Medium distance, larger overshoot
+                interceptDistance = getRandomFloat(80, 140);
             } else {
-                // Far away
-                interceptDistance = getRandomFloat(30, 60);
+                // Far away, maximum overshoot
+                interceptDistance = getRandomFloat(100, 180);
             }
 
             // Calculate the interception point along the attacker's path
