@@ -2,6 +2,8 @@
 
 A captivating web-based visualization project that brings the iconic "Itano Circus" animation style to life using the powerful Babylon.js 3D rendering engine.
 
+Created with Jetbrains's Junie, Google Gemini and Cursor.
+
 ## What is the Itano Circus?
 
 The "Itano Circus" is a renowned animation technique pioneered by Japanese animator Ichiro Itano, famously seen in anime series such as *Macross*. It is characterized by an overwhelming display of missiles or projectiles moving with intricate, swirling, and acrobatic trajectories, often leaving behind distinctive smoke trails. This technique creates a dynamic and visually stunning sense of aerial combat and chaotic beauty.
