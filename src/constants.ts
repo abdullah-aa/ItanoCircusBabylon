@@ -1,0 +1,14 @@
+export const MISSILE_SPEED = 15; // Increased for more dramatic pursuit
+export const ATTACKER_SPEED = 2; // Increased for more agile evasion
+export const EVASION_THRESHOLD_MIN = 20; // Increased for more dramatic evasions
+export const EVASION_THRESHOLD_MAX = 40; // Increased for earlier evasion triggers
+export const MISSILE_LIFETIME = 15000; // Increased lifetime for longer dramatic sequences
+export const MISSILE_LAUNCH_INTERVAL_MIN = 2000; // Longer intervals for bigger barrages
+export const MISSILE_LAUNCH_INTERVAL_MAX = 4000; // Longer intervals for bigger barrages
+export const ITANO_MISSILE_COUNT_MIN = 15; // Minimum missiles for Itano Circus effect
+export const ITANO_MISSILE_COUNT_MAX = 25; // Maximum missiles for Itano Circus effect
+export const STATION_SIZE = 20;
+export const ATTACKER_SIZE = 5;
+export const MISSILE_SIZE = 2;
+export const STARFIELD_SIZE = 1000;
+export const STAR_COUNT = 2000;
