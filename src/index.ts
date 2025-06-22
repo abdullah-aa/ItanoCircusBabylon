@@ -64,6 +64,12 @@ interface IAttacker {
     lastEvasionTime: number; // When the last evasion maneuver was performed
     isEvading: boolean;      // Whether the attacker is currently evading
     evasionCooldown?: number; // Random cooldown time between evasions
+    bezierPaths?: Vector3[][]; // Array of bezier curves, each with 4 control points
+    currentBezierPath?: number; // Index of the current bezier path being followed
+    bezierTime?: number; // Position along the current bezier curve
+    useBezier: boolean; // Whether to use bezier curves for movement
+    lastPathUpdateTime?: number; // Track when we last updated the path
+    targetReached?: boolean; // Whether the current target point has been reached
 }
 
 // Main function to create the scene
@@ -483,6 +489,12 @@ const createAttacker = (scene: Scene): IAttacker => {
         Math.sin(initialAngle) * initialRadius
     );
 
+    // Create initial bezier paths from current position to target
+    const initialBezierPaths = createMultiBezierPath(
+        attackerMesh.position.clone(),
+        initialTarget.clone()
+    );
+
     return {
         mesh: attackerMesh,
         trail: attackerTrail,
@@ -498,7 +510,14 @@ const createAttacker = (scene: Scene): IAttacker => {
             ? getRandomFloat(EVASION_THRESHOLD_MIN, EVASION_THRESHOLD_MIN + 2)
             : getRandomFloat(EVASION_THRESHOLD_MIN + 3, EVASION_THRESHOLD_MAX),
         lastEvasionTime: 0,
-        isEvading: false
+        isEvading: false,
+        // Initialize bezier path properties
+        bezierPaths: initialBezierPaths,
+        currentBezierPath: 0,
+        bezierTime: 0,
+        useBezier: true, // Use bezier curves for movement
+        lastPathUpdateTime: Date.now(),
+        targetReached: false
     };
 };
 
@@ -727,6 +746,16 @@ const updateAttacker = (
             attacker.mesh.position.z + evadeDirection.z * evasionDistance + perpVector.z
         );
 
+        // Create new bezier paths for evasion
+        attacker.bezierPaths = createMultiBezierPath(
+            attacker.mesh.position.clone(),
+            attacker.target.clone()
+        );
+        attacker.currentBezierPath = 0;
+        attacker.bezierTime = 0;
+        attacker.lastPathUpdateTime = currentTime;
+        attacker.targetReached = false;
+
         // Transition duration depends on proximity - faster reaction when missile is closer
         attacker.transitionDuration = 2000 - (proximityFactor * 1000); // 1-2 seconds based on proximity
         targetUpdated = true;
@@ -768,6 +797,16 @@ const updateAttacker = (
             battlestation.position.z + Math.sin(angle) * radius
         );
 
+        // Create new bezier paths for normal movement
+        attacker.bezierPaths = createMultiBezierPath(
+            attacker.mesh.position.clone(),
+            attacker.target.clone()
+        );
+        attacker.currentBezierPath = 0;
+        attacker.bezierTime = 0;
+        attacker.lastPathUpdateTime = currentTime;
+        attacker.targetReached = false;
+
         // Use longer transition for normal movement
         attacker.transitionDuration = 3500; // 3.5 seconds for smoother normal transitions
         targetUpdated = true;
@@ -797,63 +836,160 @@ const updateAttacker = (
             battlestation.position.z + Math.sin(angle) * radius
         );
 
+        // Create new bezier paths for random movement
+        attacker.bezierPaths = createMultiBezierPath(
+            attacker.mesh.position.clone(),
+            attacker.target.clone()
+        );
+        attacker.currentBezierPath = 0;
+        attacker.bezierTime = 0;
+        attacker.lastPathUpdateTime = currentTime;
+        attacker.targetReached = false;
+
         // Use longer transition for random changes
         attacker.transitionDuration = 7000; // 7 seconds for even smoother random transitions
         targetUpdated = true;
     }
 
-    // Calculate interpolation factor based on elapsed time
-    const elapsedTime = currentTime - attacker.targetChangeTime;
-    const t = Math.min(elapsedTime / attacker.transitionDuration, 1.0);
-
-    // Use smooth step interpolation for more natural movement
-    const smoothT = t * t * (3 - 2 * t);
-
-    // Interpolate between current target and new target
-    const interpolatedTarget = new Vector3(
-        attacker.currentTarget.x + (attacker.target.x - attacker.currentTarget.x) * smoothT,
-        attacker.currentTarget.y + (attacker.target.y - attacker.currentTarget.y) * smoothT,
-        attacker.currentTarget.z + (attacker.target.z - attacker.currentTarget.z) * smoothT
-    );
-
-    // Calculate direction to the interpolated target
-    const direction = interpolatedTarget.subtract(attacker.mesh.position);
-
-    if (direction.length() > 0.01) {
-        direction.normalize();
-
-        // Adjust speed based on direction change
-        // If target was just updated, gradually accelerate to full speed
-        if (targetUpdated) {
-            attacker.currentSpeed = Math.max(attacker.speed * 0.5, attacker.currentSpeed);
-        } 
-        // Otherwise, accelerate/decelerate smoothly
-        else {
-            // Accelerate to full speed
-            attacker.currentSpeed = Math.min(
-                attacker.speed,
-                attacker.currentSpeed + (attacker.speed * 0.02)
-            );
+    // Use bezier paths for movement
+    if (attacker.useBezier && attacker.bezierPaths && attacker.bezierPaths.length > 0) {
+        // Initialize bezier path tracking if needed
+        if (attacker.currentBezierPath === undefined) {
+            attacker.currentBezierPath = 0;
+        }
+        if (attacker.bezierTime === undefined) {
+            attacker.bezierTime = 0;
         }
 
-        // Update position with current speed
-        attacker.mesh.position.addInPlace(direction.scale(attacker.currentSpeed));
+        // Get the current bezier path
+        const currentPath = attacker.bezierPaths[attacker.currentBezierPath];
 
-        // Update rotation to face movement direction - do this smoothly
-        const targetQuaternion = createRotationQuaternion(direction);
+        // Calculate bezier time increment based on speed and transition duration
+        // This ensures the attacker completes the path in the specified transition duration
+        const timeIncrement = attacker.currentSpeed * (1.0 / attacker.transitionDuration) * 20;
 
-        // If attacker doesn't have a rotation quaternion yet, set it directly
-        if (!attacker.mesh.rotationQuaternion) {
-            attacker.mesh.rotationQuaternion = targetQuaternion;
-        } 
-        // Otherwise, interpolate rotation for smooth turning
-        else {
-            Quaternion.SlerpToRef(
-                attacker.mesh.rotationQuaternion,
-                targetQuaternion,
-                0.1, // Adjust this value for smoother or quicker rotation
-                attacker.mesh.rotationQuaternion
-            );
+        // Advance along the bezier curve
+        attacker.bezierTime += timeIncrement;
+
+        // Check if we've reached the end of the current bezier curve
+        if (attacker.bezierTime >= 1) {
+            // Move to the next bezier curve if available
+            if (attacker.currentBezierPath < attacker.bezierPaths.length - 1) {
+                attacker.currentBezierPath++;
+                attacker.bezierTime = 0;
+            } else {
+                // We've reached the end of all bezier curves
+                attacker.targetReached = true;
+                // Keep bezierTime at 1 to stay at the end of the curve
+                attacker.bezierTime = 1;
+            }
+        }
+
+        // Calculate position on current bezier curve
+        const newPosition = calculateBezierPoint(
+            attacker.bezierTime,
+            currentPath[0],
+            currentPath[1],
+            currentPath[2],
+            currentPath[3]
+        );
+
+        // Calculate direction for rotation
+        const direction = newPosition.subtract(attacker.mesh.position);
+
+        if (direction.length() > 0.01) {
+            direction.normalize();
+
+            // Adjust speed based on direction change
+            // If target was just updated, gradually accelerate to full speed
+            if (targetUpdated) {
+                attacker.currentSpeed = Math.max(attacker.speed * 0.5, attacker.currentSpeed);
+            } 
+            // Otherwise, accelerate/decelerate smoothly
+            else {
+                // Accelerate to full speed
+                attacker.currentSpeed = Math.min(
+                    attacker.speed,
+                    attacker.currentSpeed + (attacker.speed * 0.02)
+                );
+            }
+
+            // Update position directly from bezier calculation
+            attacker.mesh.position.copyFrom(newPosition);
+
+            // Update rotation to face movement direction - do this smoothly
+            const targetQuaternion = createRotationQuaternion(direction);
+
+            // If attacker doesn't have a rotation quaternion yet, set it directly
+            if (!attacker.mesh.rotationQuaternion) {
+                attacker.mesh.rotationQuaternion = targetQuaternion;
+            } 
+            // Otherwise, interpolate rotation for smooth turning
+            else {
+                Quaternion.SlerpToRef(
+                    attacker.mesh.rotationQuaternion,
+                    targetQuaternion,
+                    0.1, // Adjust this value for smoother or quicker rotation
+                    attacker.mesh.rotationQuaternion
+                );
+            }
+        }
+    } 
+    // Fallback to linear interpolation if bezier paths are not available
+    else {
+        // Calculate interpolation factor based on elapsed time
+        const elapsedTime = currentTime - attacker.targetChangeTime;
+        const t = Math.min(elapsedTime / attacker.transitionDuration, 1.0);
+
+        // Use smooth step interpolation for more natural movement
+        const smoothT = t * t * (3 - 2 * t);
+
+        // Interpolate between current target and new target
+        const interpolatedTarget = new Vector3(
+            attacker.currentTarget.x + (attacker.target.x - attacker.currentTarget.x) * smoothT,
+            attacker.currentTarget.y + (attacker.target.y - attacker.currentTarget.y) * smoothT,
+            attacker.currentTarget.z + (attacker.target.z - attacker.currentTarget.z) * smoothT
+        );
+
+        // Calculate direction to the interpolated target
+        const direction = interpolatedTarget.subtract(attacker.mesh.position);
+
+        if (direction.length() > 0.01) {
+            direction.normalize();
+
+            // Adjust speed based on direction change
+            // If target was just updated, gradually accelerate to full speed
+            if (targetUpdated) {
+                attacker.currentSpeed = Math.max(attacker.speed * 0.5, attacker.currentSpeed);
+            } 
+            // Otherwise, accelerate/decelerate smoothly
+            else {
+                // Accelerate to full speed
+                attacker.currentSpeed = Math.min(
+                    attacker.speed,
+                    attacker.currentSpeed + (attacker.speed * 0.02)
+                );
+            }
+
+            // Update position with current speed
+            attacker.mesh.position.addInPlace(direction.scale(attacker.currentSpeed));
+
+            // Update rotation to face movement direction - do this smoothly
+            const targetQuaternion = createRotationQuaternion(direction);
+
+            // If attacker doesn't have a rotation quaternion yet, set it directly
+            if (!attacker.mesh.rotationQuaternion) {
+                attacker.mesh.rotationQuaternion = targetQuaternion;
+            } 
+            // Otherwise, interpolate rotation for smooth turning
+            else {
+                Quaternion.SlerpToRef(
+                    attacker.mesh.rotationQuaternion,
+                    targetQuaternion,
+                    0.1, // Adjust this value for smoother or quicker rotation
+                    attacker.mesh.rotationQuaternion
+                );
+            }
         }
     }
 
