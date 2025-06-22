@@ -2,7 +2,6 @@ import {
   Animation,
   Color3,
   Color4,
-  DirectionalLight,
   Mesh,
   MeshBuilder,
   ParticleSystem,
@@ -13,7 +12,7 @@ import {
   Vector3,
 } from '@babylonjs/core';
 import { STAR_COUNT, STARFIELD_SIZE, STATION_SIZE } from './constants';
-import { createRotationQuaternion, getRandomFloat, getRandomInt } from './utils';
+import { createRotationQuaternion, getRandomInt } from './utils';
 
 /**
  * Creates a starfield background using a particle system.

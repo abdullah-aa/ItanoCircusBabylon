@@ -5,7 +5,6 @@ import {
   Engine,
   FollowCamera,
   HemisphericLight,
-  PointLight,
   Scene,
   Space,
   Vector3,
@@ -76,11 +75,6 @@ export const createScene = (canvas: HTMLCanvasElement): Scene => {
   // --- LIGHTS ---
   const hemisphericLight = new HemisphericLight('hemisphericLight', new Vector3(0, 1, 0), scene);
   hemisphericLight.intensity = 0.5;
-
-  const pointLight = new PointLight('pointLight', Vector3.Zero(), scene);
-  pointLight.intensity = 0.5;
-  pointLight.diffuse = new Color3(1, 0.8, 0.6);
-  pointLight.specular = new Color3(1, 0.8, 0.6);
 
   // --- ENVIRONMENT & GAME OBJECTS ---
   createStarfield(scene, MAPPED_ASSETS);
