@@ -22,11 +22,27 @@ export const createRadar = (): void => {
   const content = document.getElementById('radar-content');
   const toggleButton = document.getElementById('toggle-radar');
 
+  // Set initial state - if radar content is not visible, hide the header text
+  if (content && content.style.display === 'none' && radar) {
+    const headerText = radar.querySelector('h3');
+    if (headerText) {
+      headerText.style.display = 'none';
+    }
+  }
+
   if (header && content && toggleButton) {
     const toggle = () => {
       const isCollapsed = content.style.display === 'none';
       content.style.display = isCollapsed ? 'block' : 'none';
       toggleButton.textContent = isCollapsed ? '-' : '+';
+
+      // Hide the header text when collapsed
+      if (radar) {
+        const headerText = radar.querySelector('h3');
+        if (headerText) {
+          headerText.style.display = isCollapsed ? 'block' : 'none';
+        }
+      }
     };
 
     header.addEventListener('click', toggle);
