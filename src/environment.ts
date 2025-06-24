@@ -333,7 +333,6 @@ export function updateBattlestationAnimations(
   scene: Scene
 ): void {
   const metadata = battlestation.metadata;
-  const deltaTime = 16; // Assume ~60fps for smooth transitions
 
   // Track when barrage is launched
   if (isLaunchingBarrage) {

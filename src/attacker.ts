@@ -15,10 +15,11 @@ import {
   ATTACKER_SPEED,
   EVASION_THRESHOLD_MAX,
   EVASION_THRESHOLD_MIN,
+  STATION_SIZE,
 } from './constants';
 import { createTrail } from './effects';
 import { IAttacker, IMissile } from './types';
-import { createRotationQuaternion, getRandomFloat } from './utils';
+import { createRotationQuaternion, getRandomFloat, createBezierPath, calculateBezierTangent } from './utils';
 
 /**
  * Creates the attacker spacecraft, including its mesh and trail effects.
@@ -163,11 +164,11 @@ export const createAttacker = (scene: Scene, mappedAssets: Map<string, string>):
     evasionThreshold: getRandomFloat(EVASION_THRESHOLD_MIN, EVASION_THRESHOLD_MAX),
     lastEvasionTime: 0,
     isEvading: false,
-    // Simplified properties - keeping for compatibility but not used
-    bezierPaths: undefined,
+    // Enable bezier curve movement
+    bezierPaths: [createBezierPath(attackerMesh.position, initialTarget)],
     currentBezierPath: 0,
     bezierTime: 0,
-    useBezier: false,
+    useBezier: true,
     lastPathUpdateTime: Date.now(),
     targetReached: false,
     isPerformingBarrelRoll: false,
@@ -196,6 +197,24 @@ export const updateAttacker = (
 ): void => {
   const PATH_CHANGE_COOLDOWN = 2000; // 2 seconds cooldown between path changes
   const COLLISION_THRESHOLD = 40; // Distance to trigger evasion
+  const STATION_AVOIDANCE_DISTANCE = STATION_SIZE * 4; // Minimum distance to maintain from station
+  const STATION_REPULSION_STRENGTH = 6; // How strongly to push away from station
+
+  // Check distance to battlestation and apply avoidance
+  const distanceToBattlestation = Vector3.Distance(attacker.mesh.position, battlestation.position);
+  let stationAvoidanceForce = Vector3.Zero();
+  let needsStationAvoidance = false;
+  
+  if (distanceToBattlestation < STATION_AVOIDANCE_DISTANCE) {
+    needsStationAvoidance = true;
+    // Calculate repulsion vector away from station
+    const awayFromStation = attacker.mesh.position.subtract(battlestation.position);
+    if (awayFromStation.length() > 0.01) {
+      // Normalize and scale by inverse distance (closer = stronger repulsion)
+      const repulsionStrength = STATION_REPULSION_STRENGTH * (1 - distanceToBattlestation / STATION_AVOIDANCE_DISTANCE);
+      stationAvoidanceForce = awayFromStation.normalize().scale(repulsionStrength);
+    }
+  }
 
   // Check if any missiles are too close
   let needsNewPath = false;
@@ -211,72 +230,121 @@ export const updateAttacker = (
     }
   }
 
-  // Calculate movement direction towards target
-  const toTarget = attacker.target.subtract(attacker.mesh.position);
-  let distanceToTarget = toTarget.length();
-
-  // Check if we need a new target (collision avoidance, natural progression, or reached current target)
-  const pathComplete = currentTime - attacker.targetChangeTime > attacker.transitionDuration;
-  const targetReached = distanceToTarget < 5.0; // Increased threshold to prevent stopping
-
-  if (needsNewPath || pathComplete || targetReached) {
+  // Initialize bezier paths if not using bezier or no paths exist
+  if (!attacker.useBezier || !attacker.bezierPaths || attacker.bezierPaths.length === 0) {
     // Generate a new curved path around the battlestation
     const angle = Math.random() * Math.PI * 2;
     const height = getRandomFloat(-100, 100);
-    const radius = getRandomFloat(120, 200);
+         const radius = getRandomFloat(Math.max(140, STATION_AVOIDANCE_DISTANCE + 30), 220);
 
-    attacker.target = new Vector3(
+    const newTarget = new Vector3(
       battlestation.position.x + Math.cos(angle) * radius,
       battlestation.position.y + height,
       battlestation.position.z + Math.sin(angle) * radius
     );
 
-    attacker.currentTarget = attacker.mesh.position.clone();
-    attacker.targetChangeTime = currentTime;
-    attacker.transitionDuration = getRandomFloat(3000, 5000); // 3-5 seconds per path
+         attacker.bezierPaths = [createBezierPath(attacker.mesh.position, newTarget)];
+     attacker.currentBezierPath = 0;
+     attacker.bezierTime = 0;
+     attacker.useBezier = true;
+     attacker.targetChangeTime = currentTime;
+     attacker.lastPathUpdateTime = currentTime;
+   }
 
-    // Recalculate direction to new target
-    toTarget.copyFrom(attacker.target.subtract(attacker.mesh.position));
-    distanceToTarget = toTarget.length();
-  }
+   // Check if we need a new bezier path
+   const pathComplete = (attacker.bezierTime || 0) >= 1.0;
+   const timeSinceLastUpdate = currentTime - (attacker.lastPathUpdateTime || 0);
+   const shouldUpdatePath = timeSinceLastUpdate > getRandomFloat(6000, 8000); // 6-8 seconds between path updates
 
-  // Calculate movement direction - always move towards target
-  let movementDirection: Vector3;
-  if (distanceToTarget > 0.01) {
-    // Move towards target at constant speed
-    movementDirection = toTarget.normalize();
+   if (needsNewPath || pathComplete || shouldUpdatePath) {
+     // Generate a new curved path around the battlestation, avoiding getting too close
+     const angle = Math.random() * Math.PI * 2;
+     const height = getRandomFloat(-100, 100);
+     const radius = getRandomFloat(Math.max(140, STATION_AVOIDANCE_DISTANCE + 30), 220);
 
-    // Apply speed directly per frame (speed is already calibrated for per-frame movement)
-    const movementDistance = attacker.speed;
+     const newTarget = new Vector3(
+       battlestation.position.x + Math.cos(angle) * radius,
+       battlestation.position.y + height,
+       battlestation.position.z + Math.sin(angle) * radius
+     );
 
-    // Don't overshoot the target
-    const actualMovementDistance = Math.min(movementDistance, distanceToTarget);
+     // Create new bezier path from current position to new target
+     attacker.bezierPaths = [createBezierPath(attacker.mesh.position, newTarget)];
+     attacker.currentBezierPath = 0;
+     attacker.bezierTime = 0;
+     attacker.targetChangeTime = currentTime;
+     attacker.lastPathUpdateTime = currentTime;
+   }
 
-    // Update position
-    const newPosition = attacker.mesh.position.add(movementDirection.scale(actualMovementDistance));
-    attacker.mesh.position.copyFrom(newPosition);
-  } else {
-    // Very close to target, use forward direction for rotation
-    movementDirection = Vector3.Forward();
-  }
+   // Follow bezier curve
+   if (attacker.useBezier && attacker.bezierPaths && attacker.bezierPaths.length > 0) {
+     const currentPath = attacker.bezierPaths[attacker.currentBezierPath || 0];
+     
+     if (currentPath && currentPath.length >= 4) {
+       // Get tangent vector (direction) at current position
+       const tangent = calculateBezierTangent(
+         attacker.bezierTime || 0,
+         currentPath[0],
+         currentPath[1],
+         currentPath[2],
+         currentPath[3]
+       );
 
-  if (movementDirection.length() > 0.01) {
-    movementDirection.normalize();
+       // Calculate movement direction and distance for constant speed
+       let movementDirection = tangent.normalize();
+       const desiredMoveDistance = attacker.speed; // Use attacker speed directly
+       
+       // Apply station avoidance if too close
+       if (needsStationAvoidance && stationAvoidanceForce.length() > 0.01) {
+         // Blend movement direction with avoidance force (stronger influence)
+         movementDirection = movementDirection.add(stationAvoidanceForce.scale(1.5)).normalize();
+       }
+       
+       // Move at constant speed in the direction
+       const newPosition = attacker.mesh.position.add(movementDirection.scale(desiredMoveDistance));
+       attacker.mesh.position.copyFrom(newPosition);
 
-    // Smooth rotation towards movement direction
-    const targetRotation = createRotationQuaternion(movementDirection);
+       // Update bezier time based on how much we actually moved along the curve
+       // This is an approximation - we increment based on tangent length
+       const tangentLength = tangent.length();
+       if (tangentLength > 0.01) {
+         const timeIncrement = desiredMoveDistance / (tangentLength * 100); // Scale factor for reasonable progression
+         attacker.bezierTime = Math.min((attacker.bezierTime || 0) + timeIncrement, 1.0);
+       } else {
+         // If tangent is too small, use small fixed increment
+         attacker.bezierTime = Math.min((attacker.bezierTime || 0) + 0.01, 1.0);
+       }
 
-    if (!attacker.mesh.rotationQuaternion) {
-      attacker.mesh.rotationQuaternion = targetRotation;
-    } else {
-      Quaternion.SlerpToRef(
-        attacker.mesh.rotationQuaternion,
-        targetRotation,
-        0.1, // Smooth rotation interpolation
-        attacker.mesh.rotationQuaternion
-      );
-    }
-  }
+       // Handle curve completion
+       if (attacker.bezierTime >= 1.0) {
+         // Move to next bezier path if available
+         if (attacker.bezierPaths && attacker.currentBezierPath! < attacker.bezierPaths.length - 1) {
+           attacker.currentBezierPath!++;
+           attacker.bezierTime = 0;
+         } else {
+           // Path completed, will generate new one on next update
+           attacker.targetReached = true;
+         }
+       }
+
+       // Smooth rotation towards movement direction
+       if (movementDirection.length() > 0.01) {
+         movementDirection.normalize();
+         const targetRotation = createRotationQuaternion(movementDirection);
+
+         if (!attacker.mesh.rotationQuaternion) {
+           attacker.mesh.rotationQuaternion = targetRotation;
+         } else {
+           Quaternion.SlerpToRef(
+             attacker.mesh.rotationQuaternion,
+             targetRotation,
+             0.1, // Smooth rotation interpolation
+             attacker.mesh.rotationQuaternion
+           );
+         }
+       }
+     }
+   }
 
   // Update speed for reference (not used for position)
   attacker.currentSpeed = attacker.speed;

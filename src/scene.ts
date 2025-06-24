@@ -1,6 +1,5 @@
 import {
   ArcRotateCamera,
-  Color3,
   Color4,
   Engine,
   FollowCamera,

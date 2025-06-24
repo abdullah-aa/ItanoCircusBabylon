@@ -78,6 +78,35 @@ export const calculateBezierPoint = (
 };
 
 /**
+ * Calculates the tangent (derivative) of a cubic Bezier curve at parameter t.
+ * This gives the direction and relative speed at any point on the curve.
+ * @param t - The position on the curve (0 to 1).
+ * @param p0 - The start point of the curve.
+ * @param p1 - The first control point.
+ * @param p2 - The second control point.
+ * @param p3 - The end point of the curve.
+ * @returns A Vector3 representing the tangent vector at position t.
+ */
+export const calculateBezierTangent = (
+  t: number,
+  p0: Vector3,
+  p1: Vector3,
+  p2: Vector3,
+  p3: Vector3
+): Vector3 => {
+  const oneMinusT = 1 - t;
+  const oneMinusTSquared = oneMinusT * oneMinusT;
+  const tSquared = t * t;
+
+  // Derivative of cubic bezier: 3 * (1-t)^2 * (p1-p0) + 6 * (1-t) * t * (p2-p1) + 3 * t^2 * (p3-p2)
+  const term1 = p1.subtract(p0).scale(3 * oneMinusTSquared);
+  const term2 = p2.subtract(p1).scale(6 * oneMinusT * t);
+  const term3 = p3.subtract(p2).scale(3 * tSquared);
+
+  return term1.add(term2).add(term3);
+};
+
+/**
  * Creates a single, randomized Bezier curve between two points.
  * This is used to generate windy, unpredictable flight paths.
  * @param startPos - The starting position of the curve.
