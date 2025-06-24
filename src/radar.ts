@@ -7,7 +7,7 @@ let radarGrid: HTMLElement | null;
 let attackerDot: HTMLElement | null;
 let stationDot: HTMLElement | null;
 
-const RADAR_SCALE = 250; // a value that maps world units to radar pixels
+const MIN_RADAR_SCALE = 250; // a value that maps world units to radar pixels
 
 /**
  * Initializes the radar DOM elements and collapse/expand functionality.
@@ -53,16 +53,23 @@ export const updateRadar = (attacker: IAttacker, battlestation: Mesh): void => {
   // Attacker position relative to the station
   const attackerRelPos = attacker.mesh.position.subtract(stationPos);
 
+  // Dynamically adjust radar scale to keep the attacker in view.
+  // The scale is the larger of the X or Z distance from the center.
+  const maxDist = Math.max(Math.abs(attackerRelPos.x), Math.abs(attackerRelPos.z));
+
+  // Add a buffer so the dot is not at the very edge of the radar, and enforce a minimum scale.
+  const radarScale = Math.max(maxDist * 1.2, MIN_RADAR_SCALE);
+
   // Project to 2D (XZ plane) and scale to radar dimensions
   // X -> x, Z -> y on the radar. Invert Z for conventional top-down view.
-  const attackerRadarX = (attackerRelPos.x / RADAR_SCALE) * (radarWidth / 2) + radarWidth / 2;
-  const attackerRadarY = (-attackerRelPos.z / RADAR_SCALE) * (radarHeight / 2) + radarHeight / 2;
+  const attackerRadarX = (attackerRelPos.x / radarScale) * (radarWidth / 2) + radarWidth / 2;
+  const attackerRadarY = (-attackerRelPos.z / radarScale) * (radarHeight / 2) + radarHeight / 2;
 
   // Station is always at the center
   const stationRadarX = radarWidth / 2;
   const stationRadarY = radarHeight / 2;
 
-  // Clamp positions to radar bounds and update the dots
+  // With dynamic scaling, clamping should not be necessary for the attacker, but we keep it for safety.
   const clamp = (val: number, min: number, max: number) => Math.max(min, Math.min(val, max));
 
   // Update attacker dot
