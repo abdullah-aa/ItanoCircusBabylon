@@ -11,12 +11,13 @@ import {
 } from '@babylonjs/core';
 import {
   ATTACKER_SIZE,
-  ATTACKER_SPEED,
+  getAttackerSpeed,
   ITANO_MISSILE_COUNT_MAX,
   ITANO_MISSILE_COUNT_MIN,
-  MISSILE_LIFETIME,
+  MISSILE_LIFETIME_MAX,
+  MISSILE_LIFETIME_MIN,
   MISSILE_SIZE,
-  MISSILE_SPEED,
+  getMissileSpeed,
 } from './constants';
 import { createEnhancedMissileTrail, createExplosionEffect, createTrail } from './effects';
 import { IAttacker, IMissile, ISpiralParams, MissileFormationType } from './types';
@@ -256,7 +257,7 @@ const createItanoMissile = (
 
   // Calculate a point significantly ahead of the attacker to create overshoot
   // The higher the missile speed relative to attacker speed, the further the interception point
-  const speedRatio = MISSILE_SPEED / ATTACKER_SPEED;
+  const speedRatio = getMissileSpeed() / getAttackerSpeed();
   const distanceToTarget = Vector3.Distance(startPosition, targetPosition);
   // Calculate a much larger intercept distance to ensure significant overshooting
   const rawInterceptDistance = distanceToTarget / speedRatio;
@@ -320,7 +321,7 @@ const createItanoMissile = (
   }
 
   // Random initial speed for more varied missile behavior (reduced variation)
-  const initialSpeed = MISSILE_SPEED * getRandomFloat(0.9, 1.1);
+  const initialSpeed = getMissileSpeed() * getRandomFloat(0.9, 1.1);
 
   // Calculate spiral parameters based on formation type
   const spiralParams = calculateSpiralParams(
@@ -337,6 +338,8 @@ const createItanoMissile = (
   // Create enhanced trail for dramatic effect
   const coreTrail = createEnhancedMissileTrail(scene, missileMesh, mappedAssets);
 
+  const lifetime = getRandomFloat(MISSILE_LIFETIME_MIN, MISSILE_LIFETIME_MAX);
+
   return {
     mesh: missileMesh,
     container: missileContainer,
@@ -344,7 +347,7 @@ const createItanoMissile = (
     coreTrail,
     target: isNearMiss ? calculateNearMissTarget(interceptPoint, 15) : interceptPoint.clone(),
     speed: initialSpeed,
-    lifetime: Date.now() + MISSILE_LIFETIME,
+    lifetime: Date.now() + lifetime,
     bezierPaths,
     currentBezierPath: 0,
     bezierTime: 0,
@@ -426,6 +429,8 @@ export const updateMissiles = (
     // Check if missile has expired
     if (currentTime > missile.lifetime) {
       // Create explosion effect for expired missile
+      const minExplosionSize = getRandomFloat(1.0, 2.0);
+      const maxExplosionSize = getRandomFloat(3.0, 5.0);
       createExplosionEffect(
         missile.container.position,
         missile.container.getScene(),
@@ -433,8 +438,8 @@ export const updateMissiles = (
         'cloud.png',
         new Color4(1, 0.7, 0.1, 1),
         new Color4(1, 0.5, 0.1, 1),
-        1.5, // Increased min size
-        4.0 // Increased max size
+        minExplosionSize, // Increased min size
+        maxExplosionSize // Increased max size
       );
 
       // Remove the missile and all its trails
@@ -485,7 +490,7 @@ export const updateMissiles = (
       missile.target = interceptPoint.clone();
 
       // Change missile velocity randomly but keep it within reasonable bounds
-      missile.speed = MISSILE_SPEED * getRandomFloat(0.9, 1.1); // Reduced variation
+      missile.speed = getMissileSpeed() * getRandomFloat(0.9, 1.1); // Reduced variation
 
       // Create a new random multi-bezier path from current position to the new target
       if (distanceToAttacker < 30) {
@@ -654,6 +659,8 @@ export const updateMissiles = (
       Vector3.Distance(missile.container.position, attacker.mesh.position) < ATTACKER_SIZE / 2
     ) {
       // Create explosion effect
+      const minExplosionSize = getRandomFloat(1.5, 2.5);
+      const maxExplosionSize = getRandomFloat(4.5, 6.0);
       createExplosionEffect(
         missile.container.position,
         missile.container.getScene(),
@@ -661,8 +668,8 @@ export const updateMissiles = (
         'fire.png',
         new Color4(1, 0.5, 0, 1),
         new Color4(1, 0.2, 0, 1),
-        2, // Increased min size
-        5 // Increased max size
+        minExplosionSize, // Increased min size
+        maxExplosionSize // Increased max size
       );
 
       // Remove the missile and all its trails

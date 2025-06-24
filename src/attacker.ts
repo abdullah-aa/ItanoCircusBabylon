@@ -12,14 +12,19 @@ import {
 import * as earcut from 'earcut';
 import {
   ATTACKER_SIZE,
-  ATTACKER_SPEED,
+  getAttackerSpeed,
   EVASION_THRESHOLD_MAX,
   EVASION_THRESHOLD_MIN,
   STATION_SIZE,
 } from './constants';
 import { createTrail } from './effects';
 import { IAttacker, IMissile } from './types';
-import { createRotationQuaternion, getRandomFloat, createBezierPath, calculateBezierTangent } from './utils';
+import {
+  createRotationQuaternion,
+  getRandomFloat,
+  createBezierPath,
+  calculateBezierTangent,
+} from './utils';
 
 /**
  * Creates the attacker spacecraft, including its mesh and trail effects.
@@ -160,8 +165,8 @@ export const createAttacker = (scene: Scene, mappedAssets: Map<string, string>):
     currentTarget: attackerMesh.position.clone(),
     targetChangeTime: Date.now(),
     transitionDuration: 4000, // 4 seconds to transition between targets
-    speed: ATTACKER_SPEED,
-    currentSpeed: ATTACKER_SPEED,
+    speed: getAttackerSpeed(),
+    currentSpeed: getAttackerSpeed(),
     evasionThreshold: getRandomFloat(EVASION_THRESHOLD_MIN, EVASION_THRESHOLD_MAX),
     lastEvasionTime: 0,
     isEvading: false,
@@ -176,7 +181,7 @@ export const createAttacker = (scene: Scene, mappedAssets: Map<string, string>):
     barrelRollAxis: Vector3.Up(),
     lastDirectionChange: Date.now(),
     evasionIntensity: 0,
-    burstSpeed: ATTACKER_SPEED,
+    burstSpeed: getAttackerSpeed(),
     // User control
     isUserControlled: false,
     yaw: 0,
@@ -185,7 +190,7 @@ export const createAttacker = (scene: Scene, mappedAssets: Map<string, string>):
 };
 
 const updateUserControlledAttacker = (attacker: IAttacker): void => {
-  const rotationSpeed = 1.0; 
+  const rotationSpeed = 1.0;
   if (attacker.pitch !== 0 || attacker.yaw !== 0) {
     const yaw = attacker.yaw * rotationSpeed;
     const pitch = attacker.pitch * rotationSpeed;
@@ -206,7 +211,6 @@ const updateUserControlledAttacker = (attacker: IAttacker): void => {
   attacker.mesh.position.addInPlace(forward.scale(attacker.speed));
 };
 
-
 const updateAIControlledAttacker = (
   attacker: IAttacker,
   battlestation: Mesh,
@@ -223,7 +227,8 @@ const updateAIControlledAttacker = (
     needsStationAvoidance = true;
     const awayFromStation = attacker.mesh.position.subtract(battlestation.position);
     if (awayFromStation.length() > 0.01) {
-      const repulsionStrength = STATION_REPULSION_STRENGTH * (1 - distanceToBattlestation / STATION_AVOIDANCE_DISTANCE);
+      const repulsionStrength =
+        STATION_REPULSION_STRENGTH * (1 - distanceToBattlestation / STATION_AVOIDANCE_DISTANCE);
       stationAvoidanceForce = awayFromStation.normalize().scale(repulsionStrength);
     }
   }
@@ -237,11 +242,43 @@ const updateAIControlledAttacker = (
     const height = getRandomFloat(-100, 100);
     const radius = getRandomFloat(Math.max(140, STATION_AVOIDANCE_DISTANCE + 30), 220);
 
-    const newTarget = new Vector3(
+    const newTargetCandidate = new Vector3(
       battlestation.position.x + Math.cos(angle) * radius,
       battlestation.position.y + height,
       battlestation.position.z + Math.sin(angle) * radius
     );
+
+    const forward = attacker.mesh.getDirection(new Vector3(0, 0, 1)).normalize();
+    const directionToTarget = newTargetCandidate.subtract(attacker.mesh.position).normalize();
+
+    const dotProduct = Vector3.Dot(forward, directionToTarget);
+    const clampedDotProduct = Math.max(-1, Math.min(1, dotProduct));
+    const angleBetween = Math.acos(clampedDotProduct);
+    const maxAngle = 25 * (Math.PI / 180); // 25 degrees in radians
+
+    let newTarget = newTargetCandidate;
+
+    if (angleBetween > maxAngle) {
+      const rotationAxis = Vector3.Cross(forward, directionToTarget);
+
+      if (rotationAxis.lengthSquared() > 0.001) {
+        rotationAxis.normalize();
+        const clampRotation = Quaternion.RotationAxis(rotationAxis, maxAngle);
+        const newDirection = forward.applyRotationQuaternion(clampRotation);
+        const distance = Vector3.Distance(attacker.mesh.position, newTargetCandidate);
+        newTarget = attacker.mesh.position.add(newDirection.scale(distance));
+      } else {
+        // Attacker is facing directly away from the target, pick an arbitrary axis to turn
+        let arbitraryAxis = Vector3.Up();
+        if (Math.abs(Vector3.Dot(forward, arbitraryAxis)) > 0.99) {
+          arbitraryAxis = Vector3.Right(); // Use right vector if forward is aligned with up
+        }
+        const clampRotation = Quaternion.RotationAxis(arbitraryAxis, maxAngle);
+        const newDirection = forward.applyRotationQuaternion(clampRotation);
+        const distance = Vector3.Distance(attacker.mesh.position, newTargetCandidate);
+        newTarget = attacker.mesh.position.add(newDirection.scale(distance));
+      }
+    }
 
     attacker.bezierPaths = [createBezierPath(attacker.mesh.position, newTarget)];
     attacker.currentBezierPath = 0;
@@ -267,7 +304,7 @@ const updateAIControlledAttacker = (
       if (needsStationAvoidance && stationAvoidanceForce.length() > 0.01) {
         movementDirection = movementDirection.add(stationAvoidanceForce.scale(1.5)).normalize();
       }
-      
+
       const newPosition = attacker.mesh.position.add(movementDirection.scale(desiredMoveDistance));
       attacker.mesh.position.copyFrom(newPosition);
 
@@ -292,18 +329,17 @@ const updateAIControlledAttacker = (
         movementDirection.normalize();
         const targetRotation = createRotationQuaternion(movementDirection);
         if (attacker.mesh.rotationQuaternion) {
-            Quaternion.SlerpToRef(
-              attacker.mesh.rotationQuaternion,
-              targetRotation,
-              0.1,
-              attacker.mesh.rotationQuaternion
-            );
+          Quaternion.SlerpToRef(
+            attacker.mesh.rotationQuaternion,
+            targetRotation,
+            0.1,
+            attacker.mesh.rotationQuaternion
+          );
         }
       }
     }
   }
 };
-
 
 /**
  * Updates the attacker's position, rotation, and behavior on each frame.
@@ -325,13 +361,14 @@ export const updateAttacker = (
     // Look forward initially, away from the origin
     attacker.mesh.rotationQuaternion = Quaternion.FromEulerAngles(0, Math.PI, 0);
   }
-  
+
   if (attacker.isUserControlled) {
     updateUserControlledAttacker(attacker);
   } else {
     updateAIControlledAttacker(attacker, battlestation, currentTime);
   }
 
-  // Keep speed value updated
+  // Keep speed value updated with current multiplier
+  attacker.speed = getAttackerSpeed();
   attacker.currentSpeed = attacker.speed;
-}; 
+};

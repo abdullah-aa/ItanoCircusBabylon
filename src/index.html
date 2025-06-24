@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🚀 Babylon Circus </title>
+    <title>Itano Circus - BabylonJS</title>
     <style>
         html, body {
             overflow: hidden;
@@ -188,10 +188,16 @@
           </ul>
            <p><strong>Radar Guide (Attacker Dot):</strong></p>
           <ul>
-            <li><strong style="color:cyan;">Cyan:</strong> You are above the station</li>
-            <li><strong style="color:yellow;">Yellow:</strong> You are level with the station</li>
-            <li><strong style="color:magenta;">Magenta:</strong> You are below the station</li>
+            <li><strong style="color:cyan;">Cyan:</strong> Above station</li>
+            <li><strong style="color:yellow;">Yellow:</strong> At station level</li>
+            <li><strong style="color:magenta;">Magenta:</strong> Below station</li>
           </ul>
+          <p><strong>Game Speed:</strong></p>
+          <div id="game-speed-controls" style="display: flex; align-items: center; gap: 10px; margin-top: 5px;">
+            <button id="speed-decrease" style="background: rgba(255,255,255,0.2); border: 1px solid white; color: white; padding: 5px 10px; border-radius: 3px; cursor: pointer; font-size: 12px;">-</button>
+            <span id="speed-display" style="min-width: 60px; text-align: center; font-size: 12px;">1.0x</span>
+            <button id="speed-increase" style="background: rgba(255,255,255,0.2); border: 1px solid white; color: white; padding: 5px 10px; border-radius: 3px; cursor: pointer; font-size: 12px;">+</button>
+          </div>
         </div>
       </div>
     <div id="radar-overlay">
@@ -251,6 +257,29 @@
             });
 
             radarHeader.addEventListener('click', toggleRadar);
+
+            // Game speed controls
+            const speedDecrease = document.getElementById('speed-decrease');
+            const speedIncrease = document.getElementById('speed-increase');
+            const speedDisplay = document.getElementById('speed-display');
+            let currentSpeedMultiplier = 1.0;
+
+            const updateSpeedDisplay = () => {
+                speedDisplay.textContent = `${currentSpeedMultiplier.toFixed(1)}x`;
+            };
+
+            const adjustSpeed = (delta) => {
+                currentSpeedMultiplier = Math.max(0.3, Math.min(2.0, currentSpeedMultiplier + delta));
+                updateSpeedDisplay();
+                
+                // Dispatch custom event to notify the game engine
+                window.dispatchEvent(new CustomEvent('gameSpeedChanged', {
+                    detail: { speedMultiplier: currentSpeedMultiplier }
+                }));
+            };
+
+            speedDecrease.addEventListener('click', () => adjustSpeed(-0.2));
+            speedIncrease.addEventListener('click', () => adjustSpeed(0.2));
         });
     </script>
 </body>

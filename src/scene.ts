@@ -18,6 +18,7 @@ import { launchMissileBarrage, updateMissiles } from './missile';
 import { createRadar, updateRadar } from './radar';
 import { IMissile } from './types';
 import { getRandomInt, getRandomFloat } from './utils';
+import { setGameSpeedMultiplier } from './constants';
 
 /**
  * Creates the main Babylon.js scene, including all game objects, cameras, and lights.
@@ -154,6 +155,14 @@ export const createScene = (canvas: HTMLCanvasElement): Scene => {
     }
   });
 
+  // Game speed control event listener
+  window.addEventListener('gameSpeedChanged', (event: Event) => {
+    const customEvent = event as CustomEvent;
+    const speedMultiplier = customEvent.detail.speedMultiplier;
+    setGameSpeedMultiplier(speedMultiplier);
+    console.log(`Game speed changed to ${speedMultiplier.toFixed(1)}x`);
+  });
+
   let lastTapTime = 0;
   const DOUBLE_TAP_DELAY = 300; // ms
 
@@ -251,11 +260,10 @@ export const createScene = (canvas: HTMLCanvasElement): Scene => {
       } else if (!pointerDown) {
         attacker.pitch = 0; // Reset pitch if no vertical keys or swipe
       }
-
     } else {
-        // Clear inputs if not in user control mode
-        attacker.yaw = 0;
-        attacker.pitch = 0;
+      // Clear inputs if not in user control mode
+      attacker.yaw = 0;
+      attacker.pitch = 0;
     }
 
     updateAttacker(attacker, battlestation, missiles, scene, currentTime);

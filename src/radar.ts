@@ -54,11 +54,13 @@ export const updateRadar = (attacker: IAttacker, battlestation: Mesh): void => {
   const attackerRelPos = attacker.mesh.position.subtract(stationPos);
 
   // Dynamically adjust radar scale to keep the attacker in view.
-  // The scale is the larger of the X or Z distance from the center.
-  const maxDist = Math.max(Math.abs(attackerRelPos.x), Math.abs(attackerRelPos.z));
+  // Use the actual 2D distance (XZ plane) from the center.
+  const maxDist = Math.sqrt(
+    attackerRelPos.x * attackerRelPos.x + attackerRelPos.z * attackerRelPos.z
+  );
 
-  // Add a buffer so the dot is not at the very edge of the radar, and enforce a minimum scale.
-  const radarScale = Math.max(maxDist * 1.2, MIN_RADAR_SCALE);
+  // Add a small buffer to keep the dot just inside the edge, and enforce a minimum scale.
+  const radarScale = Math.max(maxDist * 1.1, MIN_RADAR_SCALE);
 
   // Project to 2D (XZ plane) and scale to radar dimensions
   // X -> x, Z -> y on the radar. Invert Z for conventional top-down view.
@@ -89,4 +91,4 @@ export const updateRadar = (attacker: IAttacker, battlestation: Mesh): void => {
   } else {
     attackerDot.style.backgroundColor = 'magenta'; // Attacker is below
   }
-}; 
+};
