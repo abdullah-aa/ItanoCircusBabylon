@@ -76,4 +76,8 @@ export interface IAttacker {
   lastDirectionChange: number; // When direction was last changed
   evasionIntensity: number; // How aggressively to evade (0-1)
   burstSpeed: number; // Temporary speed boost during evasion
+  // User control properties
+  isUserControlled: boolean;
+  yaw: number; // User control input for yaw
+  pitch: number; // User control input for pitch
 }

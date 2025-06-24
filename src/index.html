@@ -17,45 +17,240 @@
             height: 100%;
             touch-action: none;
         }
-        #mobileInstructions {
-            position: fixed;
+        #instructions-overlay {
+            position: absolute;
             bottom: 20px;
-            left: 0;
-            width: 100%;
-            background-color: rgba(0, 0, 0, 0.7);
+            left: 20px;
+            background-color: rgba(0, 0, 0, 0.6);
             color: white;
-            text-align: center;
-            padding: 10px;
-            font-family: Arial, sans-serif;
-            z-index: 1000;
-            transition: opacity 1s ease-in-out;
+            padding: 15px;
+            border-radius: 10px;
+            font-family: sans-serif;
+            width: 250px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.5);
+            z-index: 100;
         }
-        @media (hover: none) and (pointer: coarse) {
-            /* Only show on touch devices */
-            #mobileInstructions {
-                display: block;
-            }
+        #instructions-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
         }
-        @media (hover: hover) and (pointer: fine) {
-            /* Hide on non-touch devices */
-            #mobileInstructions {
-                display: none;
-            }
+        #instructions-header h3 {
+            margin: 0;
+        }
+        #toggle-instructions {
+            background: none;
+            border: 1px solid white;
+            color: white;
+            font-size: 20px;
+            line-height: 20px;
+            cursor: pointer;
+            width: 25px;
+            height: 25px;
+            border-radius: 5px;
+        }
+        #instructions-content {
+            margin-top: 10px;
+        }
+        #instructions-content ul {
+            padding-left: 20px;
+            margin-top: 5px;
+        }
+
+        #control-toggle {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 50px;
+            height: 50px;
+            background-color: rgba(0, 0, 0, 0.5);
+            border: 2px solid #fff;
+            color: #fff;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            z-index: 101;
+            font-family: monospace;
+        }
+        #control-toggle.user-controlled {
+            background-color: rgba(40, 120, 255, 0.7);
+            border-color: #aef;
+        }
+
+        #radar-overlay {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background-color: rgba(0, 0, 0, 0.6);
+            color: white;
+            padding: 15px;
+            border-radius: 10px;
+            font-family: sans-serif;
+            box-shadow: 0 0 10px rgba(0,0,0,0.5);
+            z-index: 100;
+        }
+
+        #radar-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+        }
+
+        #radar-header h3 {
+            margin: 0;
+        }
+        
+        #toggle-radar {
+            background: none;
+            border: 1px solid white;
+            color: white;
+            font-size: 20px;
+            line-height: 20px;
+            cursor: pointer;
+            width: 25px;
+            height: 25px;
+            border-radius: 5px;
+        }
+
+        #radar-content {
+            margin-top: 10px;
+            position: relative;
+        }
+
+        #radar-grid {
+            width: 200px;
+            height: 200px;
+            background-image: 
+                linear-gradient(rgba(0, 255, 0, 0.2) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 255, 0, 0.2) 1px, transparent 1px),
+                linear-gradient(rgba(0, 255, 0, 0.4) 2px, transparent 2px),
+                linear-gradient(90deg, rgba(0, 255, 0, 0.4) 2px, transparent 2px);
+            background-size: 20px 20px, 20px 20px, 100px 100px, 100px 100px;
+            background-position: -1px -1px, -1px -1px, -1px -1px, -1px -1px;
+            border: 2px solid rgba(0, 255, 0, 0.5);
+            border-radius: 50%;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        #station-dot {
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            background-color: white;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        #attacker-dot {
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            background-color: yellow;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            transition: top 0.1s linear, left 0.1s linear, background-color 0.1s linear;
         }
     </style>
 </head>
 <body>
     <canvas id="renderCanvas"></canvas>
-    <div id="mobileInstructions">Double-tap anywhere on screen to change camera</div>
+    <div id="control-toggle" title="Toggle User Control (C)">PC</div>
+    <div id="instructions-overlay">
+        <div id="instructions-header">
+          <h3>Controls & Info</h3>
+          <button id="toggle-instructions">-</button>
+        </div>
+        <div id="instructions-content">
+          <p><strong>Switch Camera:</strong></p>
+          <ul>
+              <li>Press <strong>Spacebar</strong></li>
+              <li><strong>Double-tap</strong> on screen (mobile)</li>
+          </ul>
+          <p><strong>Attacker Control:</strong></p>
+          <ul>
+              <li>Click the icon in the top-right to toggle user control.</li>
+              <li><strong>Arrow Keys:</strong> Pitch & Yaw (Desktop).</li>
+              <li><strong>Swipe:</strong> Pitch & Yaw (Mobile).</li>
+              <li><em>Note: Controls are inverted!</em></li>
+          </ul>
+          <p><strong>Camera Modes:</strong></p>
+          <ul>
+            <li>Neutral View</li>
+            <li>Attacker Front Chase</li>
+            <li>Attacker Side Chase</li>
+            <li>Attacker Rear Chase</li>
+          </ul>
+           <p><strong>Radar Guide (Attacker Dot):</strong></p>
+          <ul>
+            <li><strong style="color:cyan;">Cyan:</strong> You are above the station</li>
+            <li><strong style="color:yellow;">Yellow:</strong> You are level with the station</li>
+            <li><strong style="color:magenta;">Magenta:</strong> You are below the station</li>
+          </ul>
+        </div>
+      </div>
+    <div id="radar-overlay">
+        <div id="radar-header">
+            <h3>Radar</h3>
+            <button id="toggle-radar">-</button>
+        </div>
+        <div id="radar-content">
+            <div id="radar-grid">
+                <div id="station-dot"></div>
+                <div id="attacker-dot"></div>
+            </div>
+        </div>
+    </div>
     <script>
-        // Hide mobile instructions after a delay
-        document.addEventListener('DOMContentLoaded', function() {
-            setTimeout(function() {
-                const instructions = document.getElementById('mobileInstructions');
-                if (instructions) {
-                    instructions.classList.add('fadeOut');
+        document.addEventListener('DOMContentLoaded', () => {
+            const toggleButton = document.getElementById('toggle-instructions');
+            const content = document.getElementById('instructions-content');
+            const header = document.getElementById('instructions-header');
+            const overlay = document.getElementById('instructions-overlay');
+
+            const toggle = () => {
+                const isCollapsed = content.style.display === 'none';
+                content.style.display = isCollapsed ? 'block' : 'none';
+                toggleButton.textContent = isCollapsed ? '-' : '+';
+                overlay.style.width = isCollapsed ? '250px' : 'auto';
+                if (!isCollapsed) {
+                    overlay.querySelector('h3').style.display = 'none';
+                    overlay.style.padding = '5px';
+                    toggleButton.style.margin = '0';
+                } else {
+                    overlay.querySelector('h3').style.display = 'block';
+                    overlay.style.padding = '15px';
                 }
-            }, 5000); // Hide after 5 seconds
+            };
+
+            toggleButton.addEventListener('click', (e) => {
+                e.stopPropagation();
+                toggle();
+            });
+            
+            header.addEventListener('click', toggle);
+
+            const radarToggleButton = document.getElementById('toggle-radar');
+            const radarContent = document.getElementById('radar-content');
+            const radarHeader = document.getElementById('radar-header');
+
+            const toggleRadar = () => {
+                const isCollapsed = radarContent.style.display === 'none';
+                radarContent.style.display = isCollapsed ? 'block' : 'none';
+                radarToggleButton.textContent = isCollapsed ? '-' : '+';
+            };
+
+            radarToggleButton.addEventListener('click', (e) => {
+                e.stopPropagation();
+                toggleRadar();
+            });
+
+            radarHeader.addEventListener('click', toggleRadar);
         });
     </script>
 </body>
